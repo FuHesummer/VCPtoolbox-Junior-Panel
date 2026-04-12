@@ -16,6 +16,7 @@ import { initializeScheduleManager } from './js/schedule-manager.js';
 import { initializeRAGTuning } from './js/rag-tuning.js';
 import { initializePlaceholderViewer } from './js/placeholder-viewer.js';
 import { initializeToolApprovalManager } from './js/tool-approval.js';
+import { initializePluginStore } from './js/plugin-store.js';
 
 document.addEventListener('DOMContentLoaded', async () => {
     // 1. 通过后端验证登录状态（替代前端 Cookie 检查，解决 HttpOnly 无法读取问题）
@@ -155,6 +156,9 @@ document.addEventListener('DOMContentLoaded', async () => {
                         break;
                     case 'tool-approval-manager-section':
                         initializeToolApprovalManager();
+                        break;
+                    case 'plugin-store-section':
+                        initializePluginStore();
                         break;
                 }
             }
