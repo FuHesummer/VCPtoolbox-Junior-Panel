@@ -877,7 +877,7 @@
                 // 显示覆盖确认
                 errorMsg.textContent = `⚠️ 配置文件 "${configName}" 已存在`;
                 errorMsg.style.display = 'block';
-                errorMsg.style.color = '#f59e0b';
+                errorMsg.style.color = '#c08840';
                 
                 // 如果确认按钮已经变成了覆盖按钮，则执行覆盖
                 if (confirmBtn.dataset.confirmOverwrite === 'true') {
@@ -888,7 +888,7 @@
                     // 修改按钮为确认覆盖
                     confirmBtn.textContent = '⚠️ 确认覆盖';
                     confirmBtn.dataset.confirmOverwrite = 'true';
-                    confirmBtn.style.background = 'linear-gradient(135deg, #f59e0b, #d97706)';
+                    confirmBtn.style.background = '#d4a060';
                 }
                 return;
             }
@@ -1171,7 +1171,7 @@
                     // 文件已存在，显示覆盖确认
                     errorMsg.textContent = `⚠️ 文件 "${fileName}.txt" 已存在`;
                     errorMsg.style.display = 'block';
-                    errorMsg.style.color = '#f59e0b';
+                    errorMsg.style.color = '#c08840';
                     
                     // 如果确认按钮已经变成了覆盖按钮，则执行覆盖
                     if (confirmBtn.dataset.confirmOverwrite === 'true') {
@@ -1182,7 +1182,7 @@
                         // 修改按钮为确认覆盖
                         confirmBtn.textContent = '⚠️ 确认覆盖';
                         confirmBtn.dataset.confirmOverwrite = 'true';
-                        confirmBtn.style.background = 'linear-gradient(135deg, #f59e0b, #d97706)';
+                        confirmBtn.style.background = '#d4a060';
                     }
                     return;
                 }

@@ -1,7 +1,7 @@
 // AdminPanel/script.js
 import { apiFetch, showMessage, checkAuthStatus } from './js/utils.js';
 import { parseEnvToList, buildEnvString, createFormGroup, createCommentOrEmptyElement } from './js/config.js';
-import { loadPluginList, loadPluginConfig } from './js/plugins.js';
+import { loadPluginList, loadPluginConfig, initializePluginManager, loadPluginNavPage } from './js/plugins.js';
 import { initializeDashboard, stopDashboardUpdates } from './js/dashboard.js';
 import { initializeDailyNotesManager } from './js/notes-manager.js';
 import { initializeAgentManager } from './js/agent-manager.js';
@@ -17,6 +17,7 @@ import { initializeRAGTuning } from './js/rag-tuning.js';
 import { initializePlaceholderViewer } from './js/placeholder-viewer.js';
 import { initializeToolApprovalManager } from './js/tool-approval.js';
 import { initializePluginStore } from './js/plugin-store.js';
+import { initializeNewApiMonitor } from './js/newapi-monitor.js';
 
 document.addEventListener('DOMContentLoaded', async () => {
     // 1. 通过后端验证登录状态（替代前端 Cookie 检查，解决 HttpOnly 无法读取问题）
@@ -72,7 +73,16 @@ document.addEventListener('DOMContentLoaded', async () => {
      * @param {string} dataTarget - 导航链接的 data-target 属性值
      */
     function navigateTo(dataTarget) {
-        const sectionIdToActivate = `${dataTarget}-section`;
+        // Map notes sub-targets → shared section with mode
+        const NOTES_MODES = {
+            'diary-manager': 'diary',
+            'knowledge-manager': 'knowledge',
+            'public-knowledge-manager': 'public',
+        };
+        const notesMode = NOTES_MODES[dataTarget];
+        const sectionIdToActivate = notesMode
+            ? 'daily-notes-manager-section'
+            : `${dataTarget}-section`;
         const pluginName = document.querySelector(`a[data-target="${dataTarget}"]`)?.dataset.pluginName;
 
         // 停止可能正在运行的定时器
@@ -111,15 +121,23 @@ document.addEventListener('DOMContentLoaded', async () => {
         const targetSection = document.getElementById(sectionIdToActivate);
         if (targetSection) {
             // 根据 sectionId 初始化对应的模块
+            // Plugin nav pages (dynamically injected sections)
+            const isPluginNav = targetSection.classList.contains('plugin-nav-section');
+
             if (pluginName) {
                 loadPluginConfig(pluginName).catch(err => console.error(`Failed to load config for ${pluginName}`, err));
+            } else if (notesMode) {
+                initializeDailyNotesManager(notesMode);
+            } else if (isPluginNav) {
+                const navPluginName = targetSection.dataset.pluginName;
+                if (navPluginName) loadPluginNavPage(navPluginName);
             } else {
                 switch (sectionIdToActivate) {
                     case 'dashboard-section':
                         initializeDashboard();
                         break;
-                    case 'daily-notes-manager-section':
-                        initializeDailyNotesManager();
+                    case 'newapi-monitor-section':
+                        initializeNewApiMonitor();
                         break;
                     case 'agent-files-editor-section':
                         initializeAgentManager();
@@ -160,6 +178,9 @@ document.addEventListener('DOMContentLoaded', async () => {
                     case 'plugin-store-section':
                         initializePluginStore();
                         break;
+                    case 'plugin-manager-section':
+                        initializePluginManager();
+                        break;
                 }
             }
         } else {
@@ -186,22 +207,52 @@ document.addEventListener('DOMContentLoaded', async () => {
             originalBaseConfigEntries = parseEnvToList(data.content);
             baseConfigForm.innerHTML = ''; // Clear previous form
 
+            // Merge comments into the next config item's description
+            let commentBuffer = [];
             originalBaseConfigEntries.forEach((entry, index) => {
-                let formGroup;
                 if (entry.isCommentOrEmpty) {
-                    formGroup = createCommentOrEmptyElement(entry.value, index);
+                    const trimmed = entry.value.trim();
+                    // Section dividers like "# ---" or "# [Section]" become section headers
+                    if (/^#\s*[-=]{3,}/.test(trimmed)) {
+                        // Flush buffer, skip separator lines
+                        commentBuffer = [];
+                    } else if (/^#\s*\[.+\]/.test(trimmed)) {
+                        // Section header: "# [API 配置]" → visual divider
+                        commentBuffer = [];
+                        const sectionTitle = trimmed.replace(/^#\s*\[/, '').replace(/\]$/, '');
+                        const divider = document.createElement('div');
+                        divider.className = 'config-section-divider';
+                        divider.innerHTML = `<span>${sectionTitle}</span>`;
+                        baseConfigForm.appendChild(divider);
+                    } else if (trimmed === '' || trimmed === '#') {
+                        // Empty lines: reset buffer (new context)
+                        commentBuffer = [];
+                    } else {
+                        // Regular comment: buffer it for the next config key
+                        commentBuffer.push(trimmed.replace(/^#\s?/, ''));
+                    }
+                    // Still create hidden element for save/rebuild
+                    const hidden = createCommentOrEmptyElement(entry.value, index);
+                    hidden.style.display = 'none';
+                    baseConfigForm.appendChild(hidden);
                 } else {
                     let inferredType = 'string';
                     if (/^(true|false)$/i.test(entry.value)) inferredType = 'boolean';
                     else if (!isNaN(parseFloat(entry.value)) && isFinite(entry.value) && !entry.value.includes('.')) inferredType = 'integer';
 
-                    formGroup = createFormGroup(
+                    // Use buffered comments as description
+                    const desc = commentBuffer.length > 0
+                        ? commentBuffer.join(' · ')
+                        : entry.key;
+                    commentBuffer = [];
+
+                    const formGroup = createFormGroup(
                         entry.key, entry.value, inferredType,
-                        `根目录 config.env 配置项: ${entry.key}`,
+                        desc,
                         false, null, false, entry.isMultilineQuoted
                     );
+                    baseConfigForm.appendChild(formGroup);
                 }
-                baseConfigForm.appendChild(formGroup);
             });
 
             const actionsDiv = document.createElement('div');

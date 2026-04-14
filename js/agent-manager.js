@@ -324,30 +324,28 @@ async function createNewAgentFileHandler() {
  * @param {string} prefix - 当前路径前缀
  * @param {string} selectedFile - 当前选中的文件
  */
-function addFileOptions(selectElement, structure, prefix = '', selectedFile = '') {
+function addFileOptions(selectElement, structure, prefix = '', selectedFile = '', parentGroup = null) {
     for (const [name, item] of Object.entries(structure)) {
         if (item.type === 'folder') {
-            // 添加文件夹分隔符
-            const folderOption = document.createElement('option');
-            folderOption.value = '';
-            folderOption.disabled = true;
-            folderOption.textContent = `${prefix}${name}/`;
-            folderOption.style.fontWeight = 'bold';
-            selectElement.appendChild(folderOption);
-            
-            // 递归添加子文件夹中的文件
-            addFileOptions(selectElement, item.children, `${prefix}${name}/`, selectedFile);
+            // Use optgroup for folder grouping (cleaner UI)
+            const group = document.createElement('optgroup');
+            group.label = `${prefix}${name}/`;
+            const target = parentGroup || selectElement;
+            target.appendChild(group);
+
+            // Recursively add children inside the optgroup
+            addFileOptions(selectElement, item.children, `${prefix}${name}/`, selectedFile, group);
         } else if (item.type === 'file') {
-            // 添加文件选项
             const option = document.createElement('option');
             option.value = item.path;
-            option.textContent = `${prefix}${name}`;
-            
+            option.textContent = name; // Only show filename, folder is in optgroup label
+
             if (item.path === selectedFile) {
                 option.selected = true;
             }
-            
-            selectElement.appendChild(option);
+
+            const target = parentGroup || selectElement;
+            target.appendChild(option);
         }
     }
 }

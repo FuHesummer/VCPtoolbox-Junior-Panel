@@ -357,42 +357,7 @@
 </head>
 
 <body>
-    <div class="solar-system-bg" aria-hidden="true">
-        <div class="stars"></div>
-        <div class="stars2"></div>
-        <div class="stars3"></div>
-        <div class="sun"></div>
-        <div class="orbit orbit-mercury">
-            <div class="planet planet-mercury"></div>
-        </div>
-        <div class="orbit orbit-venus">
-            <div class="planet planet-venus"></div>
-        </div>
-        <div class="orbit orbit-earth">
-            <div class="planet planet-earth"></div>
-        </div>
-        <div class="orbit orbit-mars">
-            <div class="planet planet-mars"></div>
-        </div>
-        <div class="orbit orbit-jupiter">
-            <div class="planet planet-jupiter"></div>
-        </div>
-        <div class="orbit orbit-saturn">
-            <div class="planet planet-saturn"></div>
-        </div>
-        <div class="orbit orbit-uranus">
-            <div class="planet planet-uranus"></div>
-        </div>
-        <div class="orbit orbit-neptune">
-            <div class="planet planet-neptune"></div>
-        </div>
-        <div class="shooting-stars">
-            <div class="shooting-star"></div>
-            <div class="shooting-star"></div>
-            <div class="shooting-star"></div>
-        </div>
-        <button id="exit-immersive-button" class="exit-immersive-button">退出沉浸模式</button>
-    </div>
+
     <header class="top-bar">
         <div class="top-bar-content">
             <button id="mobile-menu-toggle" class="mobile-menu-toggle">
@@ -400,20 +365,12 @@
             </button>
             <div class="brand">
                 <span class="material-symbols-outlined brand-icon">terminal</span>
-                <span class="server-title">VCPToolBox</span>
+                <span class="server-title">VCPtoolbox</span>
             </div>
             <div class="header-actions">
-                <button id="animation-toggle-button" class="theme-button">
-                    <span class="material-symbols-outlined">animation</span>
-                    关闭动画
-                </button>
                 <button id="restart-server-button" class="restart-button">
                     <span class="material-symbols-outlined">restart_alt</span>
                     重启服务器
-                </button>
-                <button id="theme-toggle-button" class="theme-button">
-                    <span class="material-symbols-outlined">contrast</span>
-                    切换主题
                 </button>
             </div>
         </div>
@@ -422,48 +379,96 @@
     <div class="container">
         <aside class="sidebar">
             <div class="sidebar-header">
-                <h1>控制中心</h1>
-                <input type="search" id="sidebar-search" placeholder="搜索功能页面...">
+                <!-- Kawaii cat head -->
+                <svg class="sidebar-logo" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+                    <!-- Ears -->
+                    <polygon points="15,38 28,5 42,32" fill="#f0b8c8" stroke="#e8a0b4" stroke-width="1.5" stroke-linejoin="round"/>
+                    <polygon points="58,32 72,5 85,38" fill="#f0b8c8" stroke="#e8a0b4" stroke-width="1.5" stroke-linejoin="round"/>
+                    <!-- Inner ears -->
+                    <polygon points="22,34 30,14 38,32" fill="#f8d0dc"/>
+                    <polygon points="62,32 70,14 78,34" fill="#f8d0dc"/>
+                    <!-- Head -->
+                    <ellipse cx="50" cy="55" rx="38" ry="34" fill="#f5c6d4" stroke="#e8a0b4" stroke-width="1.5"/>
+                    <!-- Eyes -->
+                    <ellipse cx="36" cy="50" rx="6" ry="7" fill="#3d2c3e"/>
+                    <ellipse cx="64" cy="50" rx="6" ry="7" fill="#3d2c3e"/>
+                    <!-- Eye shine -->
+                    <circle cx="34" cy="47" r="2.5" fill="#fff"/>
+                    <circle cx="62" cy="47" r="2.5" fill="#fff"/>
+                    <circle cx="37" cy="52" r="1.2" fill="#fff" opacity="0.7"/>
+                    <circle cx="65" cy="52" r="1.2" fill="#fff" opacity="0.7"/>
+                    <!-- Nose -->
+                    <ellipse cx="50" cy="60" rx="3" ry="2" fill="#d4748e"/>
+                    <!-- Mouth -->
+                    <path d="M44,64 Q47,68 50,64" fill="none" stroke="#c9627e" stroke-width="1.2" stroke-linecap="round"/>
+                    <path d="M50,64 Q53,68 56,64" fill="none" stroke="#c9627e" stroke-width="1.2" stroke-linecap="round"/>
+                    <!-- Blush -->
+                    <ellipse cx="27" cy="60" rx="6" ry="4" fill="#f0a0b8" opacity="0.4"/>
+                    <ellipse cx="73" cy="60" rx="6" ry="4" fill="#f0a0b8" opacity="0.4"/>
+                    <!-- Whiskers -->
+                    <line x1="8" y1="52" x2="26" y2="56" stroke="#d4a0b4" stroke-width="1" stroke-linecap="round"/>
+                    <line x1="6" y1="60" x2="25" y2="60" stroke="#d4a0b4" stroke-width="1" stroke-linecap="round"/>
+                    <line x1="74" y1="56" x2="92" y2="52" stroke="#d4a0b4" stroke-width="1" stroke-linecap="round"/>
+                    <line x1="75" y1="60" x2="94" y2="60" stroke="#d4a0b4" stroke-width="1" stroke-linecap="round"/>
+                </svg>
+                <h1>VCPtoolbox</h1>
+                <input type="search" id="sidebar-search" placeholder="搜索...">
             </div>
             <nav id="plugin-nav">
                 <ul>
+                    <li class="nav-category">概览</li>
                     <li><a href="#" data-target="dashboard" class="active"><span
                                 class="material-symbols-outlined">dashboard</span>仪表盘</a></li>
-                    <li class="nav-category">———— 核 心 功 能 ————</li>
-                    <li><a href="#" data-target="base-config"><span
-                                class="material-symbols-outlined">settings</span>全局基础配置</a></li>
-                    <li><a href="#" data-target="daily-notes-manager"><span
-                                class="material-symbols-outlined">description</span>日记知识库管理</a></li>
-                    <li><a href="#" data-target="vcp-forum"><span
-                                class="material-symbols-outlined">forum</span>VCP论坛</a></li>
-                    <li><a href="#" data-target="semantic-groups-editor"><span
-                                class="material-symbols-outlined">hub</span>语义组编辑器</a></li>
-                    <li><a href="#" data-target="agent-files-editor"><span
-                                class="material-symbols-outlined">smart_toy</span>Agent管理与注册</a></li>
-                    <li><a href="#" data-target="toolbox-manager"><span
-                                class="material-symbols-outlined">inventory_2</span>Toolbox管理器</a></li>
-                    <li><a href="#" data-target="tvs-files-editor"><span
-                                class="material-symbols-outlined">data_object</span>高级变量编辑器</a></li>
-                    <li><a href="#" data-target="tool-list-editor"><span
-                                class="material-symbols-outlined">construction</span>工具列表配置编辑器</a></li>
-                    <li><a href="#" data-target="preprocessor-order-manager"><span
-                                class="material-symbols-outlined">sort</span>预处理器顺序管理</a></li>
-                    <li><a href="#" data-target="tool-approval-manager"><span
-                                class="material-symbols-outlined">verified_user</span>插件调用审核管理</a></li>
-                    <li><a href="#" data-target="thinking-chains-editor"><span
-                                class="material-symbols-outlined">psychology</span>思维链编辑器</a></li>
-                    <li><a href="#" data-target="schedule-manager"><span
-                                class="material-symbols-outlined">calendar_month</span>日程管理</a></li>
-                    <li><a href="#" data-target="rag-tuning"><span
-                                class="material-symbols-outlined">tune</span>浪潮RAG调参</a></li>
                     <li><a href="#" data-target="server-log-viewer"><span
                                 class="material-symbols-outlined">terminal</span>服务器日志</a></li>
+                    <li><a href="#" data-target="newapi-monitor"><span
+                                class="material-symbols-outlined">monitoring</span>NewAPI 监控</a></li>
+
+                    <li class="nav-category">配置</li>
+                    <li><a href="#" data-target="base-config"><span
+                                class="material-symbols-outlined">settings</span>全局配置</a></li>
+                    <li><a href="#" data-target="agent-files-editor"><span
+                                class="material-symbols-outlined">smart_toy</span>Agent 管理</a></li>
+                    <li><a href="#" data-target="tvs-files-editor"><span
+                                class="material-symbols-outlined">data_object</span>变量编辑器</a></li>
+                    <li><a href="#" data-target="tool-list-editor"><span
+                                class="material-symbols-outlined">construction</span>工具列表编辑</a></li>
+                    <li><a href="#" data-target="toolbox-manager"><span
+                                class="material-symbols-outlined">inventory_2</span>Toolbox 管理</a></li>
+
+                    <li class="nav-category">记忆系统</li>
+                    <li><a href="#" data-target="diary-manager"><span
+                                class="material-symbols-outlined">auto_stories</span>日记管理</a></li>
+                    <li><a href="#" data-target="knowledge-manager"><span
+                                class="material-symbols-outlined">school</span>知识库管理</a></li>
+                    <li><a href="#" data-target="public-knowledge-manager"><span
+                                class="material-symbols-outlined">menu_book</span>公共知识库</a></li>
+                    <li><a href="#" data-target="semantic-groups-editor"><span
+                                class="material-symbols-outlined">hub</span>语义组编辑</a></li>
+                    <li><a href="#" data-target="thinking-chains-editor"><span
+                                class="material-symbols-outlined">psychology</span>思维链编辑</a></li>
+                    <li><a href="#" data-target="rag-tuning"><span
+                                class="material-symbols-outlined">tune</span>RAG 调参</a></li>
+
+                    <li class="nav-category">工具</li>
+                    <li><a href="#" data-target="preprocessor-order-manager"><span
+                                class="material-symbols-outlined">sort</span>预处理器排序</a></li>
+                    <li><a href="#" data-target="tool-approval-manager"><span
+                                class="material-symbols-outlined">verified_user</span>调用审核</a></li>
                     <li><a href="#" data-target="placeholder-viewer"><span
-                                class="material-symbols-outlined">view_list</span>占位符查看器</a></li>
-                    <li class="nav-category" id="plugins-category">———— 插 件 管 理 ————</li>
+                                class="material-symbols-outlined">view_list</span>占位符查看</a></li>
+                    <li><a href="#" data-target="schedule-manager"><span
+                                class="material-symbols-outlined">calendar_month</span>日程管理</a></li>
+
+                    <li class="nav-category" id="plugins-category">插件</li>
                     <li><a href="#" data-target="plugin-store"><span
                                 class="material-symbols-outlined">store</span>插件商店</a></li>
-                    <!-- 插件列表将动态生成在这里 -->
+                    <li><a href="#" data-target="plugin-manager"><span
+                                class="material-symbols-outlined">extension</span>插件管理</a></li>
+
+                    <li class="nav-category">社区</li>
+                    <li><a href="#" data-target="vcp-forum"><span
+                                class="material-symbols-outlined">forum</span>VCP 论坛</a></li>
                 </ul>
             </nav>
         </aside>
@@ -471,12 +476,19 @@
         <main class="content" id="config-details-container">
             <!-- Section: Dashboard -->
             <section id="dashboard-section" class="config-section active-section">
-                <h2>仪表盘</h2>
-                <div class="vcp-animation-container">
-                    <div class="vcp-logo-container">
-                        <img src="VCPLogo2.png" alt="VCP Logo" class="vcp-logo" id="vcp-logo-main">
+                <div class="page-header">
+                    <span class="material-symbols-outlined page-icon">dashboard</span>
+                    <div>
+                        <h2>仪表盘</h2>
+                        <p class="page-desc">系统运行状态一览</p>
                     </div>
-                    <canvas id="vcp-animation-canvas"></canvas>
+                </div>
+                <div class="welcome-banner">
+                    <span class="welcome-icon">🐱</span>
+                    <div class="welcome-text">
+                        <h3>欢迎回来！</h3>
+                        <p>VCPtoolbox-Junior 正在运行中，一切看起来还不错~</p>
+                    </div>
                 </div>
                 <div class="dashboard-grid">
                     <div class="status-card cpu-card">
@@ -528,22 +540,55 @@
                             <!-- 日历挂件将动态加载到这里 -->
                         </div>
                     </div>
+                    <div class="status-card newapi-dash-card" id="newapi-dash-card">
+                        <h3>NewAPI 用量</h3>
+                        <div class="status-card-content" id="newapi-dash-content">
+                            <p>加载中...</p>
+                        </div>
+                    </div>
+                    <!-- 插件注入的仪表盘卡片将动态添加到这里 -->
                 </div>
-                <div class="activity-chart-container">
-                    <h3>服务器活跃度</h3>
+                <div class="activity-chart-container content-card">
+                    <h3><span class="material-symbols-outlined">monitoring</span>服务器活跃度</h3>
                     <canvas id="activity-chart-canvas"></canvas>
                 </div>
             </section>
 
+            <!-- Section: NewAPI Monitor -->
+            <section id="newapi-monitor-section" class="config-section">
+                <div class="page-header">
+                    <span class="material-symbols-outlined page-icon">monitoring</span>
+                    <div>
+                        <h2>NewAPI 监控</h2>
+                        <p class="page-desc">最近 24 小时用量总览</p>
+                    </div>
+                </div>
+                <div id="newapi-monitor-root">
+                    <p class="loading-text" style="text-align:center;padding:40px;">加载中...</p>
+                </div>
+            </section>
+
             <section id="base-config-section" class="config-section">
-                <h2>全局基础配置 (config.env)</h2>
+                <div class="page-header">
+                    <span class="material-symbols-outlined page-icon">settings</span>
+                    <div>
+                        <h2>全局配置</h2>
+                        <p class="page-desc">config.env 核心参数管理</p>
+                    </div>
+                </div>
                 <form id="base-config-form">
                     <button type="submit">保存全局配置</button>
                 </form>
             </section>
 
             <section id="daily-notes-manager-section" class="config-section">
-                <h2>日记知识库与RAG标签管理</h2>
+                <div class="page-header">
+                    <span class="material-symbols-outlined page-icon">description</span>
+                    <div>
+                        <h2>知识库管理</h2>
+                        <p class="page-desc">日记、知识库与 RAG 标签</p>
+                    </div>
+                </div>
                 <div class="daily-notes-manager">
                     <div class="notes-sidebar">
                         <h3>知识库列表</h3>
@@ -608,8 +653,7 @@
             </section>
 
             <section id="semantic-groups-editor-section" class="config-section">
-                <h2>语义组编辑器</h2>
-                <p class="description">管理 RAGDiaryPlugin 使用的语义组。语义组通过关键词激活，将相关的向量注入查询，以提高检索的准确性。</p>
+                <div class="page-header"><span class="material-symbols-outlined page-icon">hub</span><div><h2>语义组编辑</h2><p class="page-desc">管理语义组关键词与向量注入</p></div></div>
                 <div class="semantic-groups-controls">
                     <button id="save-semantic-groups-button">保存所有更改</button>
                     <button id="add-semantic-group-button">添加新组</button>
@@ -621,8 +665,7 @@
             </section>
 
             <section id="agent-files-editor-section" class="config-section">
-                <h2>Agent 管理</h2>
-                <p class="description">管理 Agent 的定义名称与对应的 .txt 文件。在这里可以添加、删除和修改 Agent 映射，并直接编辑关联的文本文件。</p>
+                <div class="page-header"><span class="material-symbols-outlined page-icon">smart_toy</span><div><h2>Agent 管理</h2><p class="page-desc">Agent 映射与提示词编辑</p></div></div>
                 <div class="agent-manager-container">
                     <div class="agent-map-editor">
                         <h3>Agent 映射表</h3>
@@ -782,7 +825,7 @@
             </section>
 
             <section id="server-log-viewer-section" class="config-section">
-                <h2>服务器实时日志</h2>
+                <div class="page-header"><span class="material-symbols-outlined page-icon">terminal</span><div><h2>服务器日志</h2><p class="page-desc">实时日志查看与搜索</p></div></div>
                 <div class="log-viewer-container">
                     <div class="log-header">
                         <span id="server-log-path-display">当前日志文件: 加载中...</span>
@@ -831,7 +874,7 @@
 
             <!-- Section: VCP Forum -->
             <section id="vcp-forum-section" class="config-section">
-                <h2>VCP 论坛</h2>
+                <div class="page-header"><span class="material-symbols-outlined page-icon">forum</span><div><h2>VCP 论坛</h2><p class="page-desc">社区交流</p></div></div>
                 <div class="forum-controls">
                     <label for="forum-board-filter">筛选板块:</label>
                     <select id="forum-board-filter">
@@ -846,7 +889,7 @@
 
             <!-- Section: Schedule Manager -->
             <section id="schedule-manager-section" class="config-section">
-                <h2>日程管理</h2>
+                <div class="page-header"><span class="material-symbols-outlined page-icon">calendar_month</span><div><h2>日程管理</h2><p class="page-desc">定时任务与日程安排</p></div></div>
                 <div class="schedule-manager-container">
                     <div class="schedule-left-panel">
                         <div class="calendar-container card">
@@ -894,8 +937,7 @@
 
             <!-- Section: RAG Tuning -->
             <section id="rag-tuning-section" class="config-section">
-                <h2>RAG 算法调参 (rag_params.json)</h2>
-                <p class="description">在这里，您可以实时调整 TagMemo 算法的各项核心参数。所有更改将立即生效，无需重启服务器。</p>
+                <div class="page-header"><span class="material-symbols-outlined page-icon">tune</span><div><h2>RAG 调参</h2><p class="page-desc">TagMemo 算法核心参数实时调整</p></div></div>
 
                 <div class="rag-tuning-container">
                     <div class="rag-tuning-main">
@@ -915,9 +957,13 @@
             </section>
 
             <section id="plugin-store-section" class="config-section">
-                <h2>插件商店</h2>
-                <p class="description">浏览、安装和管理来自远程插件仓库的可选插件。安装后重启服务即可生效。</p>
+                <div class="page-header"><span class="material-symbols-outlined page-icon">store</span><div><h2>插件商店</h2><p class="page-desc">浏览、安装和管理可选插件</p></div></div>
                 <div id="plugin-store-content"></div>
+            </section>
+
+            <section id="plugin-manager-section" class="config-section">
+                <div class="page-header"><span class="material-symbols-outlined page-icon">extension</span><div><h2>插件管理</h2><p class="page-desc">已安装插件的配置与管理</p></div></div>
+                <div id="plugin-manager-content"></div>
             </section>
         </main>
     </div>

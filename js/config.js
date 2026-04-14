@@ -268,7 +268,7 @@ export function createFormGroup(key, value, type, descriptionHtml, isPluginConfi
         input.type = 'checkbox';
         input.checked = String(value).toLowerCase() === 'true';
         const sliderSpan = document.createElement('span');
-        sliderSpan.className = 'slider';
+        sliderSpan.className = 'switch-slider';
         switchLabel.appendChild(input);
         switchLabel.appendChild(sliderSpan);
         switchContainer.appendChild(switchLabel);
