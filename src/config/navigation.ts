@@ -32,6 +32,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { title: 'Agent 管理', route: 'agents', icon: 'smart_toy' },
       { title: '变量编辑器', route: 'tvs', icon: 'data_object' },
       { title: 'Toolbox 管理', route: 'toolbox', icon: 'build' },
+      { title: '模型提示词', route: 'model-prompts', icon: 'tune' },
     ],
   },
   {

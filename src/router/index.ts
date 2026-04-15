@@ -26,6 +26,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'agents', name: 'agents', component: () => import('@/views/config/AgentManagerView.vue'), meta: { group: 'config', title: 'Agent 管理' } },
       { path: 'tvs', name: 'tvs', component: () => import('@/views/config/TvsEditorView.vue'), meta: { group: 'config', title: '变量编辑器' } },
       { path: 'toolbox', name: 'toolbox', component: () => import('@/views/config/ToolboxManagerView.vue'), meta: { group: 'config', title: 'Toolbox 管理' } },
+      { path: 'model-prompts', name: 'model-prompts', component: () => import('@/views/config/ModelPromptsView.vue'), meta: { group: 'config', title: '模型提示词' } },
       // tool-list-editor 已合并到 Toolbox 管理（顶部「从插件生成」按钮）
       { path: 'tool-list-editor', redirect: { name: 'toolbox' } },
 
