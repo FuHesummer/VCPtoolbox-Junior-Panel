@@ -187,7 +187,84 @@
                       </button>
                       <button class="btn" @click="saveFile" :disabled="!fileDirty || fileLoading">保存提示词</button>
                     </div>
-                    <PromptEditor v-model="fileContent" :rows="22" :placeholder="promptEditorPlaceholder" />
+                    <PromptEditor
+                      ref="promptEditorRef"
+                      v-model="fileContent"
+                      :rows="22"
+                      :placeholder="promptEditorPlaceholder"
+                    />
+
+                    <!-- 提示词健康度卡片 -->
+                    <div
+                      v-if="promptHealth && promptHealth.total > 0"
+                      class="health-card card"
+                      :class="{ clean: promptHealth.missingPlugin === 0 && promptHealth.unknown === 0 }"
+                    >
+                      <div class="hc-header">
+                        <span class="hc-title">
+                          <span class="material-symbols-outlined">health_and_safety</span>
+                          提示词健康度
+                        </span>
+                        <div class="hc-stats">
+                          <span class="hc-stat ok" :title="`${promptHealth.ok} 个变量已生效`">
+                            <span class="material-symbols-outlined">check_circle</span>{{ promptHealth.ok }}
+                          </span>
+                          <span v-if="promptHealth.missingPlugin > 0" class="hc-stat warn" :title="`${promptHealth.missingPlugin} 个变量的插件未装，可一键修复`">
+                            <span class="material-symbols-outlined">warning</span>{{ promptHealth.missingPlugin }}
+                          </span>
+                          <span v-if="promptHealth.unknown > 0" class="hc-stat err" :title="`${promptHealth.unknown} 个未知变量（可能拼写错误）`">
+                            <span class="material-symbols-outlined">error</span>{{ promptHealth.unknown }}
+                          </span>
+                          <span class="hc-total">共 {{ promptHealth.total }} 个占位符</span>
+                        </div>
+                      </div>
+
+                      <!-- 失效变量列表（按插件分组） -->
+                      <div v-if="missingByPlugin.length" class="hc-issues">
+                        <div class="hc-issues-title">
+                          <span class="material-symbols-outlined">cloud_download</span>
+                          待安装插件（装完热加载，无需重启）
+                        </div>
+                        <div v-for="group in missingByPlugin" :key="group.pluginKey || 'unknown'" class="hc-group">
+                          <div class="hc-plugin">
+                            <div class="hc-plugin-info">
+                              <strong>{{ group.pluginDisplayName || group.pluginKey }}</strong>
+                              <code class="hc-plugin-key">{{ group.pluginKey }}</code>
+                            </div>
+                            <button
+                              v-if="group.pluginKey"
+                              class="hc-install-btn"
+                              :disabled="!!installingKey"
+                              @click="triggerInstall(group.pluginKey)"
+                              type="button"
+                            >
+                              <span class="material-symbols-outlined">
+                                {{ installingKey === group.pluginKey ? 'progress_activity' : 'cloud_download' }}
+                              </span>
+                              {{ installingKey === group.pluginKey ? '安装中...' : '一键安装' }}
+                            </button>
+                          </div>
+                          <div class="hc-vars">
+                            <code v-for="v in group.placeholders" :key="v" class="hc-var">{{ v }}</code>
+                          </div>
+                        </div>
+                      </div>
+
+                      <!-- 未知变量（仓库也没有）-->
+                      <div v-if="unknownIssues.length" class="hc-issues unknown">
+                        <div class="hc-issues-title">
+                          <span class="material-symbols-outlined">help_outline</span>
+                          未知变量（仓库 registry 也没有，建议删除或自建）
+                        </div>
+                        <div class="hc-vars">
+                          <code v-for="v in unknownIssues" :key="v" class="hc-var err">{{ v }}</code>
+                        </div>
+                      </div>
+
+                      <p v-if="promptHealth.missingPlugin === 0 && promptHealth.unknown === 0" class="hc-clean-msg">
+                        ✨ 所有占位符都已生效，提示词健康！
+                      </p>
+                    </div>
                   </template>
                 </div>
 
@@ -389,6 +466,63 @@ const singleToolLiteral = '{' + '{VCP插件名}' + '}'
 const toolExampleLiteral = '{' + '{VCPDailyNoteEditor}' + '}'
 const toolboxLiteral = '{' + '{Toolbox别名}' + '}'
 const toolboxPrefixLiteral = '{' + '{toolbox:Toolbox别名}' + '}'
+
+// PromptEditor ref — 订阅健康度摘要（用 any 规避 InstanceType 循环类型推断）
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const promptEditorRef = ref<any>(null)
+const promptHealth = computed(() => {
+  const r = promptEditorRef.value
+  return r?.healthSummary?.value || r?.healthSummary || null
+})
+
+// 按插件分组的「未装但仓库有」变量
+interface HealthIssueLike {
+  placeholder: string
+  format: string
+  health: string
+  pluginKey?: string
+  pluginDisplayName?: string
+}
+const missingByPlugin = computed(() => {
+  const h = promptHealth.value
+  if (!h) return [] as Array<{ pluginKey?: string; pluginDisplayName?: string; placeholders: string[] }>
+  const groups = new Map<string, { pluginKey?: string; pluginDisplayName?: string; placeholders: string[] }>()
+  for (const issue of (h.issues as HealthIssueLike[])) {
+    if (issue.health !== 'missing-plugin') continue
+    const key = issue.pluginKey || '__unknown_plugin__'
+    if (!groups.has(key)) {
+      groups.set(key, {
+        pluginKey: issue.pluginKey,
+        pluginDisplayName: issue.pluginDisplayName,
+        placeholders: [],
+      })
+    }
+    groups.get(key)!.placeholders.push(issue.placeholder)
+  }
+  return Array.from(groups.values())
+})
+
+// 仓库 registry 都没有的未知变量
+const unknownIssues = computed(() => {
+  const h = promptHealth.value
+  if (!h) return [] as string[]
+  return (h.issues as HealthIssueLike[])
+    .filter(i => i.health === 'unknown')
+    .map(i => i.placeholder)
+})
+
+// install 中的 pluginKey（透传到 PromptEditor 的 installingPluginKey）
+const installingKey = computed(() => {
+  const r = promptEditorRef.value
+  return (r?.installingPluginKey?.value as string | null) || null
+})
+
+function triggerInstall(pluginKey: string) {
+  const r = promptEditorRef.value
+  if (r?.installMissingPlugin) {
+    r.installMissingPlugin(pluginKey)
+  }
+}
 
 const search = ref('')
 const activeTab = ref('prompt')
@@ -1201,6 +1335,147 @@ watch([editAlias, editFile, notebookList], () => {
     .material-symbols-outlined { font-size: 16px; }
   }
 }
+
+/* ============ 提示词健康度卡片 ============ */
+.health-card {
+  margin-top: 12px;
+  padding: 14px 16px;
+  border-radius: var(--radius-md);
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.06), rgba(239, 68, 68, 0.03));
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  border-left: 3px solid #f59e0b;
+
+  &.clean {
+    background: linear-gradient(135deg, rgba(34, 197, 94, 0.06), rgba(20, 184, 166, 0.03));
+    border-color: rgba(34, 197, 94, 0.25);
+    border-left-color: #22c55e;
+  }
+
+  .hc-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .hc-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--primary-text);
+    .material-symbols-outlined { font-size: 18px; color: #f59e0b; }
+  }
+  .hc-stats {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+  }
+  .hc-stat {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-weight: 600;
+    .material-symbols-outlined { font-size: 14px; }
+    &.ok { background: rgba(34, 197, 94, 0.15); color: #16a34a; }
+    &.warn { background: rgba(245, 158, 11, 0.15); color: #d97706; }
+    &.err { background: rgba(239, 68, 68, 0.15); color: #dc2626; }
+  }
+  .hc-total { color: var(--secondary-text); font-size: 11px; margin-left: 4px; }
+
+  .hc-issues {
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px dashed var(--border-color);
+  }
+  .hc-issues-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--primary-text);
+    margin-bottom: 8px;
+    .material-symbols-outlined { font-size: 14px; color: #d97706; }
+  }
+  .hc-issues.unknown .hc-issues-title .material-symbols-outlined { color: #dc2626; }
+
+  .hc-group {
+    margin-bottom: 10px;
+    padding: 10px 12px;
+    background: var(--primary-bg);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    &:last-child { margin-bottom: 0; }
+  }
+  .hc-plugin {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 6px;
+  }
+  .hc-plugin-info {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12.5px;
+    strong { color: var(--primary-text); }
+  }
+  .hc-plugin-key {
+    background: rgba(0, 0, 0, 0.06);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-family: 'JetBrains Mono', Consolas, monospace;
+    color: var(--secondary-text);
+  }
+  .hc-install-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
+    background: linear-gradient(135deg, #f59e0b, #f97316);
+    color: #fff;
+    border: none;
+    border-radius: var(--radius-pill);
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.12s;
+    &:hover:not(:disabled) { filter: brightness(1.1); transform: translateY(-1px); }
+    &:disabled {
+      opacity: 0.7;
+      cursor: progress;
+      .material-symbols-outlined { animation: spinRot 1s linear infinite; }
+    }
+    .material-symbols-outlined { font-size: 14px; }
+  }
+  .hc-vars {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .hc-var {
+    font-size: 11px;
+    background: rgba(245, 158, 11, 0.12);
+    color: #d97706;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: 'JetBrains Mono', Consolas, monospace;
+    &.err { background: rgba(239, 68, 68, 0.12); color: #dc2626; }
+  }
+  .hc-clean-msg {
+    margin: 8px 0 0;
+    font-size: 12px;
+    color: #16a34a;
+  }
+}
+@keyframes spinRot { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
 .tip {
   margin: 0;

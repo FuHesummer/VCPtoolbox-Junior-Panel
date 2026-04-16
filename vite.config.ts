@@ -38,6 +38,12 @@ export default defineConfig({
         target: 'ws://localhost:6005',
         ws: true,
       },
+      // ImageServer / FileServer 图床和文件服务（受密码保护）—— /pw=XXX/images/*  /pw=XXX/files/*
+      // 由主服务 ImageServer 插件处理；dev 模式下 proxy 到 6005 让 panel 页面能显示表情包缩略图
+      '/pw=': {
+        target: 'http://localhost:6005',
+        changeOrigin: true,
+      },
     },
   },
   build: {

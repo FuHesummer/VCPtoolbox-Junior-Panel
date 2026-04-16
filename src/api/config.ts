@@ -122,6 +122,7 @@ export type PlaceholderType =
   | 'diary'
   | 'diary_character'
   | 'async_placeholder'
+  | 'emoji'
 
 export interface PlaceholderItem {
   type: PlaceholderType

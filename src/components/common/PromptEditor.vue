@@ -11,6 +11,9 @@ import BaseModal from '@/components/common/BaseModal.vue'
 import RagChipEditor from '@/components/common/RagChipEditor.vue'
 import { getPlaceholders, type PlaceholderItem, type PlaceholderType } from '@/api/config'
 import { getToolboxMap, type ToolboxMap } from '@/api/toolbox'
+import { getPlaceholderRegistry, lookupPlaceholder, type PlaceholderRegistry } from '@/api/placeholderRegistry'
+import { installPlugin } from '@/api/pluginStore'
+import { listPlugins } from '@/api/plugins'
 
 const props = defineProps<{
   modelValue: string
@@ -27,12 +30,18 @@ const editorEl = ref<HTMLDivElement | null>(null)
 let internalUpdate = false
 
 // ============ 占位符分类 ============
-type VarKind = 'Tar' | 'Var' | 'Sar' | 'Agent' | 'Sys' | 'Timeline' | 'Rag' | 'RagSim' | 'RagHybrid' | 'Tool' | 'Toolbox'
+type VarKind = 'Tar' | 'Var' | 'Sar' | 'Agent' | 'Sys' | 'Timeline' | 'Rag' | 'RagSim' | 'RagHybrid' | 'Tool' | 'Toolbox' | 'Emoji'
 type ChipFormat = 'var' | 'rag' | 'rag_sim' | 'rag_hybrid'
 
 // Toolbox alias 集合（运行期从后端拉，classify 用于识别 {{alias}} / {{toolbox:alias}}）
 const toolboxAliases = ref<Set<string>>(new Set())
 const toolboxDescMap = ref<Record<string, string>>({})
+
+// 占位符 registry（从插件仓库拉）：识别「未装插件的占位符」
+const placeholderRegistry = ref<PlaceholderRegistry | null>(null)
+
+// 已装插件名集合（用于判断 pattern 规则命中的插件是否已装 → 决定健康度）
+const installedPluginNames = ref<Set<string>>(new Set())
 
 function classify(name: string, format: ChipFormat = 'var'): VarKind {
   // RAG 三种语法按格式分类（不看名字）
@@ -51,6 +60,8 @@ function classify(name: string, format: ChipFormat = 'var'): VarKind {
   if (name.startsWith('Agent') || /^(Maid|User)/.test(name)) return 'Agent'
   // VCPXxx 前缀是 VCP 工具描述占位符（插件可能未装，但名字合法）
   if (name.startsWith('VCP')) return 'Tool'
+  // 表情包命名惯例：{{XXX表情包}} → EmojiListGenerator 生成，黄色 chip
+  if (name.endsWith('表情包')) return 'Emoji'
   return 'Sys'
 }
 
@@ -59,6 +70,7 @@ const KIND_LABEL: Record<VarKind, string> = {
   Timeline: '时间线',
   Rag: 'RAG 无条件', RagSim: '相似度检索', RagHybrid: '混合阈值', Tool: 'VCP 工具',
   Toolbox: 'Toolbox 工具集',
+  Emoji: '表情包',
 }
 
 function escapeHtml(s: string) {
@@ -77,6 +89,37 @@ const placeholderMap = computed(() => {
   return map
 })
 
+// 占位符三态：✅ 有效 / ⚠️ 仓库有但未装 / ❌ 未知（都不命中）
+export type PlaceholderHealth = 'ok' | 'missing-plugin' | 'unknown'
+
+function getHealth(name: string, format: ChipFormat = 'var'): PlaceholderHealth {
+  // RAG 三种格式不做健康度判定（日记本/元思考的有效性走另一条 RAG 管线）
+  if (format !== 'var') return 'ok'
+  // 已装插件提供的占位符 → ✅
+  if (placeholderMap.value.has(name)) return 'ok'
+  // Toolbox 工具集 → ✅
+  const toolboxName = name.startsWith('toolbox:') ? name.slice(8) : name
+  if (toolboxAliases.value.has(toolboxName)) return 'ok'
+  // 内置系统占位符白名单（Date/Time/Today/Festival/Port/Image_Key 等走 placeholderMap 已覆盖，
+  // 这里兜底特殊前缀 — VarTimeline 由 TimelineOrganizer bootstrap 动态注入）
+  if (name.startsWith('VarTimeline')) return 'ok'
+  // registry 命中
+  const found = lookupPlaceholder(placeholderRegistry.value, name)
+  if (found) {
+    // 如果对应的插件已装 → ✅（比如 EmojiListGenerator 装了，Nova表情包/Hornet表情包 都应该是 ok）
+    if (installedPluginNames.value.has(found.pluginKey)) return 'ok'
+    // 核心插件默认视为已装（registry 里标 isCorePlugin，如 TimelineOrganizer）
+    const ruleMatch = (placeholderRegistry.value?.patternRules || []).find(r => {
+      try { return new RegExp(r.pattern, r.flags || '').test(name) && r.plugin === found.pluginKey } catch { return false }
+    })
+    if (ruleMatch?.isCorePlugin) return 'ok'
+    // 仓库有但未装 → ⚠️
+    return 'missing-plugin'
+  }
+  // 其他前缀（Tar/Var/Sar/Agent/VCP）能被 classify 识别但没数据源 — 标未知
+  return 'unknown'
+}
+
 function getVarTooltip(name: string): string {
   // Toolbox 优先识别（支持 {{alias}} 和 {{toolbox:alias}} 两种格式）
   const toolboxName = name.startsWith('toolbox:') ? name.slice(8) : name
@@ -86,10 +129,21 @@ function getVarTooltip(name: string): string {
     return `${name}（Toolbox 工具集）${descLine}\n\n特性：全局去重 + 循环保护 + Fold 动态注入（仅特权角色展开）\n点击替换 / 拖拽移动 / Delete 删除`
   }
   const p = placeholderMap.value.get(name)
-  if (!p) return `${name}（${KIND_LABEL[classify(name)]}变量） — 点击替换 / 拖拽移动`
-  const desc = p.description ? `\n${p.description}` : ''
-  const preview = p.preview ? `\n→ ${p.preview.slice(0, 100)}${p.preview.length > 100 ? '...' : ''}` : ''
-  return `${p.name}${desc}${preview}\n\n点击替换 / 拖拽移动 / Delete 删除`
+  if (p) {
+    const desc = p.description ? `\n${p.description}` : ''
+    const preview = p.preview ? `\n→ ${p.preview.slice(0, 100)}${p.preview.length > 100 ? '...' : ''}` : ''
+    return `${p.name}${desc}${preview}\n\n点击替换 / 拖拽移动 / Delete 删除`
+  }
+  // 未命中已装 placeholders — 查 registry
+  const found = lookupPlaceholder(placeholderRegistry.value, name)
+  if (found) {
+    const isInstalled = installedPluginNames.value.has(found.pluginKey)
+    if (isInstalled) {
+      return `✅ ${name}\n由已装插件「${found.plugin.displayName}」(${found.pluginKey}) 提供\n\n${found.plugin.description || found.entry.description || ''}\n\n点击替换 / 拖拽移动 / Delete 删除`
+    }
+    return `⚠️ ${name}\n此变量来自「${found.plugin.displayName}」插件（当前未安装）\n\n点击 chip 可一键跳转安装，装完立即可用`
+  }
+  return `❓ ${name}（未知变量，可能拼写错误或来自未收录插件） — 点击替换 / 拖拽移动`
 }
 
 // ============ 文本 ↔ HTML 转换 ============
@@ -97,12 +151,13 @@ function getVarTooltip(name: string): string {
 function makeChipHtml(rawContent: string, format: ChipFormat = 'var'): string {
   const primaryName = format === 'rag' ? rawContent.split('::')[0] : rawContent
   const k = classify(primaryName, format)
+  const health = getHealth(primaryName, format)
   const tooltip = format === 'var' ? getVarTooltip(primaryName) : getSpecialTooltip(rawContent, format)
   // RAG 模式：chip 展示缩写（名称 · 模式1 · 模式2），节省空间
   const display = format === 'rag'
     ? primaryName + (rawContent.includes('::') ? ' · ' + rawContent.split('::').slice(1).map(m => m.replace(/^:/, '')).filter(Boolean).join(' · ') : '')
     : rawContent
-  return `<span class="var-chip kind-${k}" contenteditable="false" draggable="true" data-var="${escapeHtml(rawContent)}" data-format="${format}" title="${escapeHtml(tooltip)}">${escapeHtml(display)}</span>`
+  return `<span class="var-chip kind-${k} health-${health}" contenteditable="false" draggable="true" data-var="${escapeHtml(rawContent)}" data-format="${format}" data-health="${health}" title="${escapeHtml(tooltip)}">${escapeHtml(display)}</span>`
 }
 
 function getSpecialTooltip(raw: string, format: ChipFormat): string {
@@ -133,7 +188,7 @@ function textToHtml(text: string): string {
     } else {
       let lastIdx = 0
       // 匹配四种占位符：{{Var}} / {{toolbox:alias}} | [[X::modes]]（无条件）| <<X>>（相似度）| 《《X》》（混合阈值）
-      const re = /(\{\{(?:toolbox:)?[A-Za-z_][\w]*\}\})|(\[\[[^\[\]\n]+?\]\])|(<<[^<>\n]+?>>)|(《《[^《》\n]+?》》)/g
+      const re = /(\{\{(?:toolbox:)?[A-Za-z_\u4e00-\u9fa5][\w\u4e00-\u9fa5]*\}\})|(\[\[[^\[\]\n]+?\]\])|(<<[^<>\n]+?>>)|(《《[^《》\n]+?》》)/g
       let m: RegExpExecArray | null
       while ((m = re.exec(line)) !== null) {
         out += escapeHtml(line.substring(lastIdx, m.index))
@@ -204,7 +259,7 @@ function onEditorInput() {
   setTimeout(() => {
     if (!editorEl.value) return
     const html = editorEl.value.innerHTML
-    if (/\{\{(?:toolbox:)?[A-Za-z_][\w]*\}\}/.test(html)) {
+    if (/\{\{(?:toolbox:)?[A-Za-z_\u4e00-\u9fa5][\w\u4e00-\u9fa5]*\}\}/.test(html)) {
       const cursorAtEnd = isCursorAtEnd()
       renderToEditor()
       if (cursorAtEnd) moveCursorToEnd()
@@ -351,6 +406,115 @@ const currentChipKind = computed(() => {
   return classify(name, fmt)
 })
 
+// 当前 chip 的 registry 信息（pattern 命中或显式 registry 条目都返回，区分装/未装状态）
+const currentChipRegistryInfo = computed(() => {
+  if (!editingChipName.value || currentChipFormat.value !== 'var') return null
+  const found = lookupPlaceholder(placeholderRegistry.value, editingChipName.value)
+  if (!found) return null
+  // 已装 or 核心插件 → 正常显示「✅ 由 XXX 提供」；未装 → 显示安装按钮
+  const isInstalled = installedPluginNames.value.has(found.pluginKey)
+    || !!(placeholderRegistry.value?.patternRules || []).find(r => {
+      try { return r.isCorePlugin && new RegExp(r.pattern, r.flags || '').test(editingChipName.value) && r.plugin === found.pluginKey } catch { return false }
+    })
+  return {
+    pluginKey: found.pluginKey,
+    displayName: found.plugin.displayName,
+    category: found.plugin.category,
+    icon: found.plugin.icon,
+    description: found.plugin.description || found.entry.description || '',
+    kind: found.entry.kind,
+    commands: found.entry.commands || [],
+    isInstalled,
+  }
+})
+
+const installingPluginKey = ref<string | null>(null)
+async function installMissingPlugin(pluginKey: string) {
+  if (installingPluginKey.value) return
+  installingPluginKey.value = pluginKey
+  try {
+    const r = await installPlugin(pluginKey)
+    const ok = r?.success || r?.status === 'success'
+    if (ok) {
+      // 热加载生效 → 重新拉 placeholders + 重绘 chip
+      const reload = await getPlaceholders()
+      placeholders.value = reload.data?.list || placeholders.value
+      if (mode.value === 'rich') renderToEditor()
+      // 关闭 picker
+      pickerOpen.value = false
+    } else {
+      // 失败：保留 picker 让用户看到错误
+      console.warn('[PromptEditor] install 失败:', r?.message)
+    }
+  } catch (e) {
+    console.error('[PromptEditor] install 异常:', e)
+  } finally {
+    installingPluginKey.value = null
+  }
+}
+
+// 扫描当前文本，统计所有占位符的健康度（供父组件订阅）
+interface HealthIssue {
+  placeholder: string
+  format: ChipFormat
+  health: PlaceholderHealth
+  pluginKey?: string
+  pluginDisplayName?: string
+}
+interface HealthSummary {
+  total: number
+  ok: number
+  missingPlugin: number
+  unknown: number
+  issues: HealthIssue[]
+}
+
+const healthSummary = computed<HealthSummary>(() => {
+  const text = props.modelValue || ''
+  const seen = new Set<string>()
+  const issues: HealthIssue[] = []
+  let total = 0, ok = 0, missingPlugin = 0, unknown = 0
+
+  const re = /(\{\{(?:toolbox:)?[A-Za-z_\u4e00-\u9fa5][\w\u4e00-\u9fa5]*\}\})|(\[\[[^\[\]\n]+?\]\])|(<<[^<>\n]+?>>)|(《《[^《》\n]+?》》)/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(text)) !== null) {
+    let raw = ''
+    let fmt: ChipFormat = 'var'
+    if (m[1]) { raw = m[1].slice(2, -2); fmt = 'var' }
+    else if (m[2]) { raw = m[2].slice(2, -2); fmt = 'rag' }
+    else if (m[3]) { raw = m[3].slice(2, -2); fmt = 'rag_sim' }
+    else if (m[4]) { raw = m[4].slice(2, -2); fmt = 'rag_hybrid' }
+    const key = `${fmt}:${raw}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    total++
+    const primaryName = fmt === 'rag' ? raw.split('::')[0] : raw
+    const h = getHealth(primaryName, fmt)
+    if (h === 'ok') ok++
+    else if (h === 'missing-plugin') {
+      missingPlugin++
+      const found = lookupPlaceholder(placeholderRegistry.value, primaryName)
+      issues.push({
+        placeholder: raw,
+        format: fmt,
+        health: h,
+        pluginKey: found?.pluginKey,
+        pluginDisplayName: found?.plugin.displayName,
+      })
+    } else {
+      unknown++
+      issues.push({ placeholder: raw, format: fmt, health: h })
+    }
+  }
+  return { total, ok, missingPlugin, unknown, issues }
+})
+
+defineExpose({
+  healthSummary,
+  installMissingPlugin,
+  installingPluginKey,
+})
+
 // ============ chip 拖拽 ============
 let draggingChip: HTMLElement | null = null
 
@@ -440,7 +604,46 @@ onMounted(() => {
   }
   // 预加载 Toolbox 工具集列表（classify 用于识别 alias chip）
   loadToolboxMap()
+  // 预加载 placeholder registry（识别未装插件提供的占位符）
+  getPlaceholderRegistry().then(r => {
+    placeholderRegistry.value = r.data || null
+    const reg = placeholderRegistry.value
+    console.log('[PromptEditor] Registry 加载完成:', {
+      hasData: !!reg,
+      pluginCount: Object.keys(reg?.plugins || {}).length,
+      patternCount: (reg?.patternRules || []).length,
+      patterns: (reg?.patternRules || []).map(p => ({ pattern: p.pattern, plugin: p.plugin })),
+    })
+    // 立即测试 Nova表情包 识别
+    if (reg) {
+      const testMatch = (reg.patternRules || []).find(p => {
+        try { return new RegExp(p.pattern, p.flags || '').test('Nova表情包') } catch { return false }
+      })
+      console.log('[PromptEditor] Nova表情包 → pattern 匹配:', testMatch ? testMatch.plugin : '无')
+    }
+    if (mode.value === 'rich') renderToEditor()
+  }).catch(e => {
+    console.warn('[PromptEditor] Registry 加载失败:', e)
+  })
+  // 预加载已装插件列表（用于 pattern 规则 + 已装判定：比如 EmojiListGenerator 装了，{{XXX表情包}} 应该变绿）
+  loadInstalledPlugins()
 })
+
+async function loadInstalledPlugins() {
+  try {
+    const r = await listPlugins({ suppressErrorToast: true, showLoader: false })
+    // /admin_api/plugins 直接返回数组（不走 {data:[]} 包装）
+    const list = (Array.isArray(r) ? r : []) as Array<{ name?: string; manifest?: { name?: string } }>
+    const names = new Set<string>()
+    for (const p of list) {
+      const n = p?.name || p?.manifest?.name
+      if (n) names.add(n)
+    }
+    installedPluginNames.value = names
+    console.log('[PromptEditor] 已装插件加载完成:', names.size, '个 — EmojiListGenerator=' + names.has('EmojiListGenerator'))
+    if (mode.value === 'rich') renderToEditor()
+  } catch (e) { console.warn('[PromptEditor] loadInstalledPlugins 失败（不阻断）:', e) }
+}
 
 // ============ Toolbox 工具集加载 ============
 const toolboxLoading = ref(false)
@@ -532,6 +735,7 @@ const CATEGORY_LABEL: Record<PlaceholderType, string> = {
   diary: '日记本',
   diary_character: '人物日记',
   async_placeholder: '异步占位符',
+  emoji: '表情包清单',
 }
 
 const CATEGORY_ICON: Partial<Record<PlaceholderType, string>> = {
@@ -546,6 +750,7 @@ const CATEGORY_ICON: Partial<Record<PlaceholderType, string>> = {
   diary: 'menu_book',
   diary_character: 'person',
   async_placeholder: 'schedule',
+  emoji: 'emoji_emotions',
 }
 
 const categoryTabs = computed(() => {
@@ -805,7 +1010,37 @@ function insertAllTools() {
               <code class="cc-name">{{ editingChipName }}</code>
               <span class="cc-kind-tag">{{ KIND_LABEL[currentChipKind] }}</span>
             </div>
-            <div v-if="currentChipSpecialInfo">
+            <div v-if="currentChipRegistryInfo" class="cc-registry-hint" :class="{ installed: currentChipRegistryInfo.isInstalled }">
+              <p class="cc-desc">
+                <span class="material-symbols-outlined">{{ currentChipRegistryInfo.isInstalled ? 'check_circle' : 'info' }}</span>
+                <template v-if="currentChipRegistryInfo.isInstalled">
+                  此变量由已装插件「<strong>{{ currentChipRegistryInfo.displayName }}</strong>」提供
+                </template>
+                <template v-else>
+                  此变量来自「<strong>{{ currentChipRegistryInfo.displayName }}</strong>」插件
+                </template>
+                <code class="cc-plugin-key">{{ currentChipRegistryInfo.pluginKey }}</code>
+              </p>
+              <p v-if="currentChipRegistryInfo.description" class="cc-preview">
+                {{ currentChipRegistryInfo.description }}
+              </p>
+              <p v-if="currentChipRegistryInfo.commands?.length" class="cc-commands">
+                提供命令：{{ currentChipRegistryInfo.commands.slice(0, 5).join(' · ') }}{{ currentChipRegistryInfo.commands.length > 5 ? ' ...' : '' }}
+              </p>
+              <button
+                v-if="!currentChipRegistryInfo.isInstalled"
+                class="cc-install-btn"
+                :disabled="!!installingPluginKey"
+                @click="installMissingPlugin(currentChipRegistryInfo.pluginKey)"
+                type="button"
+              >
+                <span class="material-symbols-outlined">
+                  {{ installingPluginKey === currentChipRegistryInfo.pluginKey ? 'progress_activity' : 'cloud_download' }}
+                </span>
+                {{ installingPluginKey === currentChipRegistryInfo.pluginKey ? '正在安装并热加载...' : '一键安装修复（无需重启）' }}
+              </button>
+            </div>
+            <div v-else-if="currentChipSpecialInfo">
               <p class="cc-desc">{{ currentChipSpecialInfo.description }}</p>
               <p class="cc-preview">→ {{ currentChipSpecialInfo.preview }}</p>
             </div>
@@ -813,7 +1048,7 @@ function insertAllTools() {
               <p v-if="currentChipPlaceholder.description" class="cc-desc">{{ currentChipPlaceholder.description }}</p>
               <p v-if="currentChipPlaceholder.preview" class="cc-preview">→ {{ currentChipPlaceholder.preview }}</p>
             </div>
-            <p v-else class="cc-unknown">⚠️ 此变量未在系统占位符列表中识别（可能拼写错误或来自未启用插件）</p>
+            <p v-else class="cc-unknown">❌ 此变量在已装插件和云仓库 registry 中都未找到（可能拼写错误或来自私人插件）</p>
           </div>
           <button class="cc-delete" @click="deleteEditingChip" type="button" title="删除此变量">
             <span class="material-symbols-outlined">delete</span>
@@ -1176,8 +1411,38 @@ function insertAllTools() {
   &.kind-RagHybrid { background: rgba(217, 70, 239, 0.18); color: #a732c8; border: 1px solid rgba(217, 70, 239, 0.4); }
   &.kind-Tool { background: rgba(14, 165, 233, 0.15); color: #0284c7; border: 1px solid rgba(14, 165, 233, 0.35); }
   &.kind-Toolbox { background: linear-gradient(135deg, rgba(20, 184, 166, 0.18), rgba(34, 197, 94, 0.12)); color: #0d9488; border: 1px solid rgba(20, 184, 166, 0.4); }
+  &.kind-Emoji { background: linear-gradient(135deg, rgba(250, 204, 21, 0.2), rgba(245, 158, 11, 0.15)); color: #b45309; border: 1px solid rgba(245, 158, 11, 0.45); }
   &.kind-Agent { background: rgba(212, 116, 142, 0.18); color: #b25a76; border: 1px solid rgba(212, 116, 142, 0.4); }
   &.kind-Sys { background: rgba(136, 136, 136, 0.18); color: #555; border: 1px solid rgba(136, 136, 136, 0.4); }
+
+  /* 三态健康度覆盖层 —— 覆盖 kind-* 的 border 样式，表达失效警告 */
+  &.health-missing-plugin {
+    border-color: #f59e0b !important;
+    border-style: dashed !important;
+    border-width: 1.5px !important;
+    box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.12);
+    &::after {
+      content: '⚠';
+      font-size: 10px;
+      margin-left: 4px;
+      color: #d97706;
+      font-weight: 700;
+    }
+  }
+  &.health-unknown {
+    border-color: #ef4444 !important;
+    border-style: dashed !important;
+    border-width: 1.5px !important;
+    box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.12);
+    opacity: 0.8;
+    &::after {
+      content: '?';
+      font-size: 10px;
+      margin-left: 4px;
+      color: #b91c1c;
+      font-weight: 700;
+    }
+  }
 }
 
 /* ============ 占位符选择弹窗 ============ */
@@ -1206,6 +1471,7 @@ function insertAllTools() {
   &.kind-RagHybrid { border-color: rgba(217, 70, 239, 0.5); background: linear-gradient(135deg, rgba(217, 70, 239, 0.08), rgba(217, 70, 239, 0.02)); }
   &.kind-Tool { border-color: rgba(14, 165, 233, 0.5); background: linear-gradient(135deg, rgba(14, 165, 233, 0.08), rgba(14, 165, 233, 0.02)); }
   &.kind-Toolbox { border-color: rgba(20, 184, 166, 0.5); background: linear-gradient(135deg, rgba(20, 184, 166, 0.08), rgba(34, 197, 94, 0.02)); }
+  &.kind-Emoji { border-color: rgba(245, 158, 11, 0.5); background: linear-gradient(135deg, rgba(250, 204, 21, 0.08), rgba(245, 158, 11, 0.02)); }
   &.kind-Agent { border-color: rgba(212, 116, 142, 0.5); background: linear-gradient(135deg, rgba(212, 116, 142, 0.08), rgba(212, 116, 142, 0.02)); }
   &.kind-Sys { border-color: rgba(136, 136, 136, 0.5); }
   .cc-icon {
@@ -1259,8 +1525,53 @@ function insertAllTools() {
   &.kind-RagHybrid .cc-kind-tag { background: #d946ef; }
   &.kind-Tool .cc-kind-tag { background: #0ea5e9; }
   &.kind-Toolbox .cc-kind-tag { background: linear-gradient(135deg, #14b8a6, #22c55e); }
+  &.kind-Emoji .cc-kind-tag { background: linear-gradient(135deg, #facc15, #f59e0b); }
   &.kind-Agent .cc-kind-tag { background: #d4748e; }
   &.kind-Sys .cc-kind-tag { background: #888; }
+
+  .cc-registry-hint {
+    .cc-desc {
+      display: flex; align-items: center; gap: 6px;
+      .material-symbols-outlined { font-size: 16px; color: #f59e0b; }
+    }
+    .cc-plugin-key {
+      background: rgba(0, 0, 0, 0.06);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-family: 'JetBrains Mono', Consolas, monospace;
+    }
+    .cc-commands {
+      margin: 4px 0 0;
+      font-size: 11px;
+      color: var(--secondary-text);
+      font-style: italic;
+    }
+    .cc-install-btn {
+      margin-top: 10px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      background: linear-gradient(135deg, #f59e0b, #f97316);
+      color: #fff;
+      border: none;
+      border-radius: var(--radius-pill);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      box-shadow: 0 2px 6px rgba(245, 158, 11, 0.3);
+      transition: all 0.12s;
+      &:hover:not(:disabled) { filter: brightness(1.1); transform: translateY(-1px); }
+      &:disabled {
+        opacity: 0.75;
+        cursor: progress;
+        .material-symbols-outlined { animation: spinRot 1s linear infinite; }
+      }
+      .material-symbols-outlined { font-size: 16px; }
+    }
+  }
+
   .cc-desc {
     margin: 0 0 4px;
     font-size: 12.5px;
@@ -1297,6 +1608,11 @@ function insertAllTools() {
     .material-symbols-outlined { font-size: 16px; }
     &:hover { background: rgba(217, 85, 85, 0.1); }
   }
+}
+
+@keyframes spinRot {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 .picker-divider {
