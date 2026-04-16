@@ -1,0 +1,104 @@
+name: Release AdminPanel
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g. v2.1.0)'
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint & typecheck
+        run: |
+          npm run lint
+          npm run typecheck
+
+      - name: Build
+        run: |
+          npm run build
+          ls -la dist
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Package AdminPanel.zip
+        run: |
+          cd dist
+          zip -r "../AdminPanel-${{ steps.version.outputs.tag }}.zip" .
+          cd ..
+          # latest 别名（不带版本号）供本体 ADMIN_PANEL_SOURCE 直连使用
+          cp "AdminPanel-${{ steps.version.outputs.tag }}.zip" AdminPanel.zip
+          ls -lh AdminPanel*.zip
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: "AdminPanel ${{ steps.version.outputs.tag }}"
+          generate_release_notes: true
+          body: |
+            ## 下载
+
+            | 文件 | 说明 |
+            |------|------|
+            | `AdminPanel-${{ steps.version.outputs.tag }}.zip` | 版本锁定（推荐生产） |
+            | `AdminPanel.zip` | latest 别名 |
+
+            ## 使用方式
+
+            ### 方式 1：ADMIN_PANEL_SOURCE 环境变量（推荐）
+
+            解压到任意路径，在本体 `config.env` 中配置：
+
+            ```
+            ADMIN_PANEL_SOURCE=/path/to/extracted/AdminPanel
+            ```
+
+            ### 方式 2：并列仓库 clone
+
+            ```bash
+            cd <本体所在目录>/..
+            git clone https://github.com/FuHesummer/VCPtoolbox-Junior-Panel.git
+            cd VCPtoolbox-Junior-Panel
+            npm ci && npm run build
+            # 本体 adminServer.js 会自动探测 sibling repo 的 dist/
+            ```
+
+            ## 开发指南
+
+            查阅 [PANEL_DEVELOPER_GUIDE.md](https://github.com/FuHesummer/VCPtoolbox-Junior-Panel/blob/main/PANEL_DEVELOPER_GUIDE.md)
+          draft: false
+          prerelease: false
+          files: |
+            AdminPanel-${{ steps.version.outputs.tag }}.zip
+            AdminPanel.zip

@@ -24,6 +24,37 @@ export function saveMainConfig(content: string) {
   })
 }
 
+// ============ env 绑定行级操作（供 TvsEditor 快捷按钮） ============
+
+export interface EnvBindingAddResult {
+  ok: boolean
+  action: 'appended' | 'updated'
+  key: string
+  value: string
+}
+
+export interface EnvBindingRemoveResult {
+  ok: boolean
+  removed: Array<{ key: string; value: string }>
+  message?: string
+}
+
+/** 往 config.env 追加（或更新）一行 KEY=value 绑定 */
+export function addEnvBinding(key: string, value: string) {
+  return apiFetch<EnvBindingAddResult>('/admin_api/config/env-binding/add', {
+    method: 'POST',
+    body: { key, value },
+  })
+}
+
+/** 从 config.env 删除 env 绑定行：按 key 或按 filename（value 等于 filename 的所有行） */
+export function removeEnvBinding(opts: { key?: string; filename?: string }) {
+  return apiFetch<EnvBindingRemoveResult>('/admin_api/config/env-binding/remove', {
+    method: 'POST',
+    body: opts,
+  })
+}
+
 export function getToolApprovalConfig() {
   return apiFetch<ToolApprovalConfig>('/admin_api/tool-approval-config')
 }

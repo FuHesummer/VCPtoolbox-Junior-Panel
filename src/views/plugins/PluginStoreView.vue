@@ -2,7 +2,7 @@
   <div class="page">
     <PageHeader title="插件商店" subtitle="从远程仓库浏览 / 安装插件（含 requires 依赖连锁）" icon="storefront">
       <template #actions>
-        <input v-model="keyword" type="text" placeholder="搜索..." class="search" />
+        <SearchInput v-model="keyword" placeholder="搜索..." />
         <button class="btn btn-ghost" @click="checkUpdates" :disabled="loading">
           <span class="material-symbols-outlined">system_update</span>
           检查更新
@@ -142,6 +142,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import PageHeader from '@/components/common/PageHeader.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
+import SearchInput from '@/components/common/SearchInput.vue'
 import ServiceWarn from '@/components/common/ServiceWarn.vue'
 import {
   listRemotePlugins, listInstalledPlugins, resolveDependencies,

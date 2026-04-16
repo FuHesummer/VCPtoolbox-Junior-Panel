@@ -49,11 +49,11 @@ const routes: RouteRecordRaw[] = [
       // 插件 adminNav 动态注入页面（通用路由）
       { path: 'plugin-nav/:name', name: 'plugin-nav', component: () => import('@/views/plugins/PluginNavView.vue'), props: true },
 
-      // 社区
-      { path: 'forum', name: 'forum', component: () => import('@/views/community/ForumView.vue'), meta: { group: 'community', title: 'VCP 论坛' } },
+      // 社区（Forum 已解耦到 VCPForum 插件，通过 plugin-nav/VCPForum 访问）
 
       // 系统
       { path: 'maintenance', name: 'maintenance', component: () => import('@/views/system/MaintenanceView.vue'), meta: { group: 'system', title: '运维中心' } },
+      { path: 'migration', name: 'migration', component: () => import('@/views/system/MigrationView.vue'), meta: { group: 'system', title: '上游迁移' } },
     ],
   },
   {

@@ -70,6 +70,19 @@
               <span v-else class="ref-count orphan" title="未被任何占位符引用">
                 <span class="material-symbols-outlined">link_off</span>0
               </span>
+              <span class="card-binding-actions">
+                <button class="binding-btn" title="把该文件加入 config.env（新建 Key= 绑定）" @click.stop="openBindingDialog(f.name)">
+                  <span class="material-symbols-outlined">add_link</span>加入全局
+                </button>
+                <button
+                  v-if="f.refs?.length"
+                  class="binding-btn danger"
+                  title="从 config.env 移除所有指向此文件的绑定"
+                  @click.stop="removeGlobalBinding(f.name)"
+                >
+                  <span class="material-symbols-outlined">link_off</span>删除全局
+                </button>
+              </span>
             </div>
           </li>
         </ul>
@@ -157,6 +170,46 @@
         <button class="btn" :disabled="!createValid" @click="confirmCreate">创建</button>
       </template>
     </BaseModal>
+
+    <!-- 加入全局（config.env 绑定）弹窗 -->
+    <BaseModal v-model="bindingOpen" title="加入全局配置（config.env）" width="520px">
+      <div class="create-form">
+        <p class="hint">
+          为 <code>{{ bindingFilename }}</code> 在 <code>config.env</code> 新增一行
+          <code>Key = {{ bindingFilename }}</code>，使占位符
+          <code v-text="LB + bindingFinalKey + RB" /> 生效。
+        </p>
+        <div class="form-row">
+          <label>前缀类型</label>
+          <div class="kind-radio">
+            <label v-for="k in ['Tar','Var','Sar']" :key="k">
+              <input type="radio" :value="k" v-model="bindingKind" />
+              <span :class="['kind-tag', k]">{{ k }}</span>
+              <small class="muted">{{ k === 'Tar' ? '系统级（system 注入）' : k === 'Var' ? '通用变量' : '条件注入（需 SarModel*）' }}</small>
+            </label>
+          </div>
+        </div>
+        <div class="form-row">
+          <label>变量后缀</label>
+          <input
+            v-model="bindingSuffix"
+            class="input flex"
+            placeholder="比如 Forum、SystemPrompt、DreamTool"
+            @keyup.enter="confirmBinding"
+          />
+        </div>
+        <p v-if="bindingFinalKey" class="hint">
+          ✦ 最终将写入 <code>{{ bindingFinalKey }}={{ bindingFilename }}</code>
+        </p>
+        <p v-if="bindingKeyExists" class="error-hint">
+          ⚠ <code>{{ bindingFinalKey }}</code> 已在 config.env 中存在，将被覆盖
+        </p>
+      </div>
+      <template #footer>
+        <button class="btn btn-ghost" @click="bindingOpen = false">取消</button>
+        <button class="btn" :disabled="!bindingValid" @click="confirmBinding">写入</button>
+      </template>
+    </BaseModal>
   </div>
 </template>
 
@@ -168,7 +221,7 @@ import CodeEditor from '@/components/common/CodeEditor.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import BaseModal from '@/components/common/BaseModal.vue'
 import { listTvsFiles, getTvsFile, saveTvsFile, deleteTvsFile } from '@/api/tvs'
-import { getMainConfig } from '@/api/config'
+import { getMainConfig, addEnvBinding, removeEnvBinding } from '@/api/config'
 import { useUiStore } from '@/stores/ui'
 import { useConfirm } from '@/composables/useConfirm'
 
@@ -201,6 +254,23 @@ const envContent = ref('')
 // === 新建对话框 ===
 const createOpen = ref(false)
 const newName = ref('')
+
+// === 加入全局（env-binding）对话框 ===
+const bindingOpen = ref(false)
+const bindingFilename = ref('')
+const bindingKind = ref<'Tar' | 'Var' | 'Sar'>('Var')
+const bindingSuffix = ref('')
+const bindingFinalKey = computed(() => {
+  const s = bindingSuffix.value.trim()
+  if (!s) return ''
+  return bindingKind.value + s
+})
+const bindingValid = computed(() =>
+  !!bindingFinalKey.value && /^[A-Za-z_][A-Za-z0-9_]*$/.test(bindingFinalKey.value)
+)
+const bindingKeyExists = computed(() =>
+  !!bindingFinalKey.value && new RegExp(`(^|\\n)\\s*${bindingFinalKey.value}\\s*=`).test(envContent.value)
+)
 
 // === 派生 ===
 const filteredFiles = computed(() => {
@@ -352,6 +422,57 @@ async function confirmCreate() {
   }
 }
 
+// === 加入全局（config.env 绑定） ===
+function openBindingDialog(filename: string) {
+  bindingFilename.value = filename
+  // 智能默认前缀：按文件名开头推测
+  const stem = filename.replace(/\.txt$/i, '')
+  bindingKind.value = /^tar/i.test(stem) ? 'Tar'
+    : /^sar/i.test(stem) ? 'Sar'
+    : 'Var'
+  // 智能推测后缀：去掉 Tool/Prompt 等习惯后缀前的词
+  const core = stem.replace(/^(var|tar|sar)/i, '').replace(/(Tool|Prompt|Txt)$/i, '')
+  bindingSuffix.value = core || stem
+  bindingOpen.value = true
+}
+
+async function confirmBinding() {
+  if (!bindingValid.value) return
+  try {
+    const r = await addEnvBinding(bindingFinalKey.value, bindingFilename.value)
+    ui.showMessage(
+      `${r.action === 'updated' ? '已更新' : '已写入'} ${r.key}=${r.value}`,
+      'success', 2000,
+    )
+    bindingOpen.value = false
+    await reload() // 刷新 refs 反查
+  } catch (e) {
+    ui.showMessage('写入 config.env 失败：' + (e as Error).message, 'error')
+  }
+}
+
+async function removeGlobalBinding(filename: string) {
+  const ok = await confirm(
+    `确认从 config.env 中移除所有指向 "${filename}" 的 Key= 绑定行吗？\n文件本身不会删除。`,
+    { danger: true, okText: '删除绑定' },
+  )
+  if (!ok) return
+  try {
+    const r = await removeEnvBinding({ filename })
+    if (r.removed.length === 0) {
+      ui.showMessage('没有匹配的 env 绑定', 'info', 2000)
+    } else {
+      ui.showMessage(
+        `已移除 ${r.removed.length} 行（${r.removed.map(x => x.key).join(', ')}）`,
+        'success', 2500,
+      )
+    }
+    await reload()
+  } catch (e) {
+    ui.showMessage('删除失败：' + (e as Error).message, 'error')
+  }
+}
+
 // === 工具 ===
 function formatBytes(n: number) {
   if (n < 1024) return `${n} B`
@@ -457,7 +578,7 @@ onMounted(reload)
   }
 
   .meta-line {
-    display: flex; gap: 6px;
+    display: flex; gap: 6px; align-items: center; flex-wrap: wrap;
     .ref-count {
       display: inline-flex; align-items: center; gap: 3px;
       padding: 1px 7px; border-radius: var(--radius-pill);
@@ -466,7 +587,54 @@ onMounted(reload)
       .material-symbols-outlined { font-size: 12px; }
       &.orphan { background: rgba(0, 0, 0, 0.04); color: var(--secondary-text); font-weight: normal; }
     }
+    .card-binding-actions {
+      margin-left: auto;
+      display: inline-flex; gap: 4px;
+    }
+    .binding-btn {
+      display: inline-flex; align-items: center; gap: 2px;
+      padding: 1px 6px;
+      font-size: 10px; line-height: 1.4;
+      color: var(--secondary-text);
+      background: transparent;
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      transition: all 0.15s;
+      .material-symbols-outlined { font-size: 12px; }
+      &:hover { color: var(--button-bg); border-color: var(--button-bg); background: var(--accent-bg); }
+      &.danger:hover { color: var(--danger-color); border-color: var(--danger-color); background: rgba(217, 85, 85, 0.08); }
+    }
   }
+}
+
+/* ===== 加入全局（config.env 绑定）对话框 ===== */
+.kind-radio {
+  display: flex; flex-direction: column; gap: 6px;
+  label {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    &:has(input:checked) {
+      border-color: var(--button-bg);
+      background: var(--accent-bg);
+    }
+  }
+  .kind-tag {
+    display: inline-block;
+    padding: 1px 8px;
+    font-size: 11px; font-weight: 600;
+    font-family: monospace;
+    border-radius: var(--radius-pill);
+    background: var(--button-bg);
+    color: #fff;
+    &.Tar { background: #6a78d4; }
+    &.Var { background: #5cb2a3; }
+    &.Sar { background: #e68a4c; }
+  }
+  small.muted { color: var(--secondary-text); }
 }
 
 .icon-btn {

@@ -2,7 +2,7 @@
   <div class="page">
     <PageHeader title="插件管理" subtitle="已安装插件的启用 / 配置 / 描述" icon="extension">
       <template #actions>
-        <input v-model="keyword" type="text" placeholder="搜索插件..." class="search" />
+        <SearchInput v-model="keyword" placeholder="搜索插件..." />
         <button class="btn btn-ghost" @click="reload" :disabled="loading">
           <span class="material-symbols-outlined">refresh</span>
           刷新
@@ -115,6 +115,7 @@
 import { computed, onMounted, ref, reactive, watch } from 'vue'
 import PageHeader from '@/components/common/PageHeader.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
+import SearchInput from '@/components/common/SearchInput.vue'
 import BaseModal from '@/components/common/BaseModal.vue'
 import Tabs from '@/components/common/Tabs.vue'
 import CodeEditor from '@/components/common/CodeEditor.vue'

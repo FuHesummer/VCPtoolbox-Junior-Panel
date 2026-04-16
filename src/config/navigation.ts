@@ -65,18 +65,13 @@ export const NAV_GROUPS: NavGroup[] = [
       { title: '插件管理', route: 'plugin-manager', icon: 'extension' },
     ],
   },
-  {
-    key: 'community',
-    title: '社区',
-    items: [
-      { title: 'VCP 论坛', route: 'forum', icon: 'forum' },
-    ],
-  },
+  // community 组已解耦到 VCPForum 插件（装了即显示在"插件面板"分组）
   {
     key: 'system',
     title: '系统',
     items: [
       { title: '运维中心', route: 'maintenance', icon: 'construction' },
+      { title: '上游迁移', route: 'migration', icon: 'swap_horiz' },
     ],
   },
 ]

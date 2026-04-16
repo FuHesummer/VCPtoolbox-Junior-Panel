@@ -2,7 +2,26 @@
   <div class="page base-config">
     <PageHeader title="全局配置" subtitle="config.env — 按字段编辑，自动保留注释" icon="settings">
       <template #actions>
-        <input v-model="search" placeholder="搜索字段..." class="search" />
+        <!-- Honeypot：诱骗密码管理器去填这俩假框 -->
+        <input type="text" name="username" autocomplete="username" tabindex="-1" aria-hidden="true" class="honeypot" />
+        <input type="password" name="password" autocomplete="current-password" tabindex="-1" aria-hidden="true" class="honeypot" />
+        <input
+          ref="searchInput"
+          v-model="search"
+          type="search"
+          name="cfg-filter-keyword-x9z"
+          autocomplete="off"
+          autocorrect="off"
+          autocapitalize="off"
+          spellcheck="false"
+          readonly
+          @focus="unlockSearchInput"
+          data-form-type="other"
+          data-lpignore="true"
+          data-1p-ignore
+          placeholder="搜索字段..."
+          class="search"
+        />
         <button class="btn btn-ghost" :class="{ 'btn-danger': rawMode }" @click="toggleRawMode">
           <span class="material-symbols-outlined">{{ rawMode ? 'view_module' : 'data_object' }}</span>
           {{ rawMode ? '表单模式' : '原文模式' }}
@@ -14,28 +33,86 @@
 
     <p v-if="dirty" class="dirty-banner">⚠️ 有 {{ dirtyCount }} 个字段未保存，保存后重启服务生效</p>
 
-    <!-- 表单模式 -->
+    <!-- 引导：被专属页面接管的字段提示 -->
+    <RouterLink v-if="dedicatedFieldsCount > 0 && !rawMode" :to="{ name: 'model-prompts' }" class="dedicated-link card">
+      <span class="material-symbols-outlined">tune</span>
+      <div class="dl-info">
+        <strong>{{ dedicatedFieldsCount }} 个模型专属指令字段已迁移到专属页面</strong>
+        <small>SarModel* / SarPrompt* 由「模型提示词」页面统一管理，避免在全局配置和专属页双源编辑</small>
+      </div>
+      <span class="material-symbols-outlined arrow">arrow_forward</span>
+    </RouterLink>
+
+    <!-- 表单模式（master-detail：左侧分类，右侧字段网格） -->
     <div v-if="!rawMode" class="content">
       <EmptyState v-if="loading" icon="sync" message="正在加载..." />
       <div v-else-if="!sections.length" class="empty-tip">
         <EmptyState icon="settings_applications" message="配置为空" />
       </div>
-      <div v-else class="sections">
-        <section v-for="(sec, idx) in sections" :key="idx" class="card section">
-          <h3 v-if="sec.title" class="section-title">
-            <span class="material-symbols-outlined">{{ sec.icon || 'settings' }}</span>
-            {{ sec.title }}
-          </h3>
-          <div class="fields">
-            <EnvField
-              v-for="e in sec.entries"
-              :key="e.originalIndex + '-' + e.key"
-              :entry="itemAt(e.originalIndex)"
-              :dirty="dirtyKeys.has(e.key)"
-              @update:value="(v) => updateValue(e.originalIndex, v)"
-            />
+      <div v-else class="layout">
+        <!-- 左侧：分类侧边栏（始终显示，避免 v-if 切换导致主区跑位） -->
+        <aside class="cat-sidebar card">
+          <div v-if="isSearching" class="search-state">
+            <span class="material-symbols-outlined">search</span>
+            <div class="state-info">
+              <strong>搜索中</strong>
+              <small>{{ filteredFieldCount }} 项匹配</small>
+            </div>
+            <button class="state-clear" title="清除搜索" @click="search = ''">
+              <span class="material-symbols-outlined">close</span>
+            </button>
           </div>
-        </section>
+          <div class="cat-list" :class="{ disabled: isSearching }">
+            <button
+              v-for="(sec, idx) in sections"
+              :key="idx"
+              class="cat-item"
+              :class="{ active: !isSearching && idx === activeSectionIdx, dirty: sectionDirtyCount(sec) > 0 }"
+              :disabled="isSearching"
+              @click="activeSectionIdx = idx"
+            >
+              <span class="material-symbols-outlined">{{ sec.icon || 'tune' }}</span>
+              <span class="cat-name">{{ sec.title || '未分类' }}</span>
+              <span class="cat-count">{{ sec.entries.length }}</span>
+              <span v-if="sectionDirtyCount(sec) > 0" class="cat-dirty-badge" :title="`${sectionDirtyCount(sec)} 项未保存`">
+                {{ sectionDirtyCount(sec) }}
+              </span>
+            </button>
+          </div>
+        </aside>
+
+        <!-- 右侧：当前分类的字段网格 / 搜索全局结果 -->
+        <main class="cat-content card">
+          <header class="cat-head" v-if="!isSearching && activeSection">
+            <span class="material-symbols-outlined">{{ activeSection.icon || 'tune' }}</span>
+            <h2>{{ activeSection.title || '未分类' }}</h2>
+            <span class="muted">{{ activeSection.entries.length }} 项</span>
+          </header>
+          <header class="cat-head" v-else-if="isSearching">
+            <span class="material-symbols-outlined">search</span>
+            <h2>搜索结果</h2>
+            <span class="muted">{{ filteredFieldCount }} 项匹配</span>
+          </header>
+
+          <div class="field-grid">
+            <div
+              v-for="e in displayedFields"
+              :key="e.originalIndex + '-' + e.key"
+              :class="['grid-cell', isFullWidthField(e.originalIndex) ? 'full' : 'half']"
+            >
+              <EnvField
+                :entry="itemAt(e.originalIndex)"
+                :dirty="dirtyKeys.has(e.key)"
+                @update:value="(v) => updateValue(e.originalIndex, v)"
+              />
+            </div>
+          </div>
+
+          <div v-if="isSearching && filteredFieldCount === 0" class="no-search-result">
+            <span class="material-symbols-outlined">search_off</span>
+            <p>没有字段匹配 "{{ search }}"</p>
+          </div>
+        </main>
       </div>
     </div>
 
@@ -48,6 +125,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import { RouterLink } from 'vue-router'
 import PageHeader from '@/components/common/PageHeader.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import CodeEditor from '@/components/common/CodeEditor.vue'
@@ -60,6 +138,10 @@ const ui = useUiStore()
 const items = ref<EnvItem[]>([])
 const original = ref<EnvItem[]>([])
 const search = ref('')
+const searchInput = ref<HTMLInputElement | null>(null)
+function unlockSearchInput() {
+  if (searchInput.value) searchInput.value.removeAttribute('readonly')
+}
 const loading = ref(false)
 const rawMode = ref(false)
 const rawContent = ref('')
@@ -102,40 +184,49 @@ function isBannerLine(text: string): boolean {
   return BANNER_REGEX.test(text.trim()) && text.trim().length >= 3
 }
 
+// 由专属页面管理的字段（不在全局配置里渲染，避免双源编辑）
+//   SarModel<N> / SarPrompt<N>  → ModelPromptsView（模型提示词专属页）
+const MANAGED_BY_DEDICATED_PAGE = /^Sar(Model|Prompt)\d+$/
+
+// 计数：被专属页面接管的字段数（用于顶部提示）
+const dedicatedFieldsCount = computed(() => {
+  let n = 0
+  for (const item of items.value) {
+    if (item.kind === 'entry' && MANAGED_BY_DEDICATED_PAGE.test(item.key)) n++
+  }
+  return n
+})
+
+// 不再受 search 影响 —— search 由 displayedFields 单独处理
+// 同时过滤掉由专属页面管理的字段（如 SarModel*/SarPrompt*）
 const sections = computed<Section[]>(() => {
   const secs: Section[] = []
   let currentTitle = ''
-  // banner 状态机：0=等第一条分隔线，1=等标题，2=等第二条分隔线
   let bannerState: 0 | 1 | 2 = 0
   let bannerTitle = ''
-  const kw = search.value.trim().toLowerCase()
 
   items.value.forEach((item, idx) => {
     if (item.kind === 'comment') {
       if (item.blank) {
-        // 空行不影响 banner 状态，但重置 bannerState（防止跨段）
         if (bannerState !== 0) bannerState = 0
         return
       }
       if (isBannerLine(item.text)) {
         if (bannerState === 0) { bannerState = 1; bannerTitle = '' }
         else if (bannerState === 2) {
-          // 完整 banner 结束：应用 title
           currentTitle = bannerTitle
           bannerState = 0
           bannerTitle = ''
         }
       } else if (bannerState === 1) {
-        // 等标题阶段 — 下一条非 banner 注释作为 title
         bannerTitle = item.text
         bannerState = 2
       }
-      // 其他情况（普通注释，作为字段 description 的来源）无需处理
       return
     }
 
-    // entry 的过滤
-    if (kw && !item.key.toLowerCase().includes(kw) && !item.description.toLowerCase().includes(kw)) return
+    // 跳过由专属页面管理的字段
+    if (MANAGED_BY_DEDICATED_PAGE.test(item.key)) return
 
     if (!secs.length || secs[secs.length - 1].title !== currentTitle) {
       secs.push({ title: currentTitle, entries: [] })
@@ -144,6 +235,66 @@ const sections = computed<Section[]>(() => {
   })
 
   return secs.filter((s) => s.entries.length > 0)
+})
+
+// ==== Master-detail 状态 ====
+const activeSectionIdx = ref(0)
+const isSearching = computed(() => search.value.trim().length > 0)
+const activeSection = computed(() => sections.value[activeSectionIdx.value] || null)
+
+// 搜索模式：跨 section 字段过滤；非搜索模式：当前 section 字段
+const displayedFields = computed(() => {
+  const kw = search.value.trim().toLowerCase()
+  if (kw) {
+    const all: Array<{ key: string; originalIndex: number }> = []
+    for (const sec of sections.value) {
+      for (const e of sec.entries) {
+        const item = items.value[e.originalIndex]
+        if (item?.kind !== 'entry') continue
+        if (
+          item.key.toLowerCase().includes(kw)
+          || (item.description || '').toLowerCase().includes(kw)
+        ) {
+          all.push(e)
+        }
+      }
+    }
+    return all
+  }
+  return activeSection.value?.entries || []
+})
+
+const filteredFieldCount = computed(() => displayedFields.value.length)
+
+function sectionDirtyCount(sec: Section): number {
+  let n = 0
+  for (const e of sec.entries) {
+    const item = items.value[e.originalIndex]
+    if (item?.kind === 'entry' && dirtyKeys.value.has(item.key)) n++
+  }
+  return n
+}
+
+// textarea / 长字段独占整行；其他字段半幅
+function isFullWidthField(originalIndex: number): boolean {
+  const item = items.value[originalIndex]
+  if (item?.kind !== 'entry') return false
+  if (item.type === 'textarea') return true
+  // 长 value（>= 80 字符）或 key 含 URL/PROMPT 关键字 → 全宽更舒服
+  if ((item.value || '').length >= 80) return true
+  if (/url|prompt|key|secret|password|token/i.test(item.key) && item.type !== 'boolean') return true
+  return false
+}
+
+// 切 section 时滚到顶部（避免长列表保留滚动位置不直观）
+watch(activeSectionIdx, () => {
+  const el = document.querySelector('.cat-content')
+  if (el) el.scrollTop = 0
+})
+
+// 当 sections 数量变化导致 activeSectionIdx 越界，自动归零
+watch(sections, (s) => {
+  if (activeSectionIdx.value >= s.length) activeSectionIdx.value = 0
 })
 
 function itemAt(index: number): EnvEntry {
@@ -212,6 +363,20 @@ onMounted(reload)
   width: 180px;
 }
 
+/* honeypot：完全不可见 + 不可聚焦，仅供密码管理器自动填充用 */
+.honeypot {
+  position: absolute;
+  left: -10000px;
+  top: -10000px;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+
 .dirty-banner {
   margin: 0 24px 12px;
   padding: 8px 14px;
@@ -222,39 +387,213 @@ onMounted(reload)
   font-size: 13px;
 }
 
+.dedicated-link {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 24px 14px;
+  padding: 12px 18px;
+  text-decoration: none;
+  color: inherit;
+  background: linear-gradient(135deg, rgba(228, 104, 156, 0.06), rgba(155, 109, 208, 0.06));
+  border: 1px dashed var(--button-bg);
+  border-radius: var(--radius-md);
+  transition: all 0.15s;
+  cursor: pointer;
+  &:hover {
+    background: linear-gradient(135deg, rgba(228, 104, 156, 0.12), rgba(155, 109, 208, 0.12));
+    border-style: solid;
+  }
+  .material-symbols-outlined {
+    font-size: 22px;
+    color: var(--button-bg);
+  }
+  .dl-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    line-height: 1.4;
+    strong { font-size: 13px; color: var(--primary-text); }
+    small { font-size: 11px; color: var(--secondary-text); margin-top: 2px; }
+  }
+  .arrow { font-size: 18px; opacity: 0.6; }
+  &:hover .arrow { opacity: 1; transform: translateX(2px); }
+}
+
 .content {
   padding: 0 24px 24px;
   flex: 1;
+  min-height: 0;
 }
 
-.sections {
+/* ===== Master-detail 布局（flex：sidebar 不存在时 main 自动占满，零纠缠） ===== */
+.layout {
+  display: flex;
+  gap: 14px;
+  height: calc(100vh - 180px);
+  min-height: 480px;
+}
+.cat-sidebar {
+  flex: 0 0 240px;   /* 固定 240px，不缩 */
+}
+.cat-content {
+  flex: 1 1 auto;    /* 主区永远撑满剩余空间 */
+  min-width: 0;      /* 允许子元素换行/收缩，避免溢出 */
+}
+
+/* 左侧：分类侧边栏 */
+.cat-sidebar {
+  padding: 8px;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 14px;
 }
-
-.section {
-  padding: 18px 20px;
-
-  .section-title {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin: 0 0 14px;
-    padding-bottom: 10px;
-    border-bottom: 1px solid var(--border-color);
-    color: var(--highlight-text);
-    font-size: 14px;
-    letter-spacing: 0.5px;
-
-    .material-symbols-outlined { font-size: 18px; }
-  }
-
-  .fields {
+.search-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  background: var(--accent-bg);
+  border: 1px solid var(--button-bg);
+  border-radius: var(--radius-sm);
+  color: var(--button-bg);
+  .material-symbols-outlined { font-size: 18px; }
+  .state-info {
+    flex: 1;
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    line-height: 1.2;
+    strong { font-size: 12px; }
+    small { font-size: 11px; opacity: 0.8; color: var(--secondary-text); }
   }
+  .state-clear {
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    color: var(--secondary-text);
+    padding: 2px;
+    border-radius: 4px;
+    display: inline-flex;
+    align-items: center;
+    .material-symbols-outlined { font-size: 16px; }
+    &:hover { background: rgba(0,0,0,0.06); color: var(--danger-color); }
+  }
+}
+.cat-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  &.disabled .cat-item { opacity: 0.5; cursor: not-allowed; }
+}
+.cat-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  text-align: left;
+  font-size: 13px;
+  color: var(--primary-text);
+  transition: all 0.12s;
+
+  .material-symbols-outlined { font-size: 18px; color: var(--secondary-text); }
+
+  &:hover { background: var(--accent-bg); }
+
+  &.active {
+    background: var(--accent-bg);
+    border-color: var(--button-bg);
+    color: var(--button-bg);
+    font-weight: 600;
+    .material-symbols-outlined { color: var(--button-bg); }
+  }
+
+  &.dirty .cat-name::after {
+    content: ' •';
+    color: var(--highlight-text);
+  }
+
+  .cat-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .cat-count {
+    font-size: 11px;
+    font-family: monospace;
+    color: var(--secondary-text);
+    background: var(--tertiary-bg);
+    padding: 1px 6px;
+    border-radius: var(--radius-pill);
+  }
+
+  .cat-dirty-badge {
+    font-size: 10px;
+    font-weight: 700;
+    color: #fff;
+    background: var(--highlight-text);
+    padding: 1px 6px;
+    border-radius: var(--radius-pill);
+  }
+}
+
+/* 右侧：当前分类的字段网格 */
+.cat-content {
+  padding: 18px 20px;
+  overflow-y: auto;
+  min-height: 0;
+}
+.cat-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border-color);
+
+  .material-symbols-outlined {
+    font-size: 22px;
+    color: var(--button-bg);
+  }
+  h2 {
+    margin: 0;
+    font-size: 16px;
+    color: var(--primary-text);
+  }
+  .muted {
+    margin-left: auto;
+    font-size: 12px;
+    color: var(--secondary-text);
+  }
+}
+
+/* 字段网格：短字段并排，长字段全宽 */
+.field-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 12px;
+}
+.grid-cell.full {
+  grid-column: 1 / -1;
+}
+
+.no-search-result {
+  padding: 60px 20px;
+  text-align: center;
+  color: var(--secondary-text);
+  .material-symbols-outlined {
+    font-size: 48px;
+    opacity: 0.4;
+    display: block;
+    margin: 0 auto 8px;
+  }
+  p { margin: 0; font-size: 14px; }
 }
 
 .empty-tip { padding: 40px 0; }

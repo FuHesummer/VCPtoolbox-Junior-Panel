@@ -136,7 +136,7 @@
                       <span v-if="fileDirty" class="dirty-dot">● 未保存</span>
                       <button class="btn" @click="saveFile" :disabled="!fileDirty || fileLoading">保存提示词</button>
                     </div>
-                    <CodeEditor v-model="fileContent" :rows="22" placeholder="输入 Agent 的角色提示词..." />
+                    <PromptEditor v-model="fileContent" :rows="22" :placeholder="promptEditorPlaceholder" />
                   </template>
                 </div>
 
@@ -267,6 +267,9 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import PageHeader from '@/components/common/PageHeader.vue'
 import CodeEditor from '@/components/common/CodeEditor.vue'
+import PromptEditor from '@/components/common/PromptEditor.vue'
+
+const promptEditorPlaceholder = '输入 Agent 的角色提示词，可用 {{AgentName}} {{Date}} {{TarSystemPrompt}} 等占位符'
 import EmptyState from '@/components/common/EmptyState.vue'
 import BaseModal from '@/components/common/BaseModal.vue'
 import Tabs from '@/components/common/Tabs.vue'
