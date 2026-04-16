@@ -8,6 +8,7 @@
 // - 顶部「插入变量」按钮 → 弹出真实占位符面板（沿用 /admin_api/placeholders）
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import BaseModal from '@/components/common/BaseModal.vue'
+import RagChipEditor from '@/components/common/RagChipEditor.vue'
 import { getPlaceholders, type PlaceholderItem, type PlaceholderType } from '@/api/config'
 
 const props = defineProps<{
@@ -25,18 +26,29 @@ const editorEl = ref<HTMLDivElement | null>(null)
 let internalUpdate = false
 
 // ============ 占位符分类 ============
-type VarKind = 'Tar' | 'Var' | 'Sar' | 'Agent' | 'Sys'
+type VarKind = 'Tar' | 'Var' | 'Sar' | 'Agent' | 'Sys' | 'Timeline' | 'Rag' | 'RagSim' | 'RagHybrid' | 'Tool'
+type ChipFormat = 'var' | 'rag' | 'rag_sim' | 'rag_hybrid'
 
-function classify(name: string): VarKind {
+function classify(name: string, format: ChipFormat = 'var'): VarKind {
+  // RAG 三种语法按格式分类（不看名字）
+  if (format === 'rag') return 'Rag'
+  if (format === 'rag_sim') return 'RagSim'
+  if (format === 'rag_hybrid') return 'RagHybrid'
+  // VarTimeline{Agent} 是 TimelineOrganizer 插件维护的 Agent 生平时间线，归专属类
+  if (name.startsWith('VarTimeline')) return 'Timeline'
   if (name.startsWith('Tar')) return 'Tar'
   if (name.startsWith('Var')) return 'Var'
   if (name.startsWith('Sar')) return 'Sar'
   if (name.startsWith('Agent') || /^(Maid|User)/.test(name)) return 'Agent'
+  // VCPXxx 前缀是 VCP 工具描述占位符（插件可能未装，但名字合法）
+  if (name.startsWith('VCP')) return 'Tool'
   return 'Sys'
 }
 
 const KIND_LABEL: Record<VarKind, string> = {
   Tar: '系统级', Var: '通用', Sar: '模型条件', Agent: 'Agent', Sys: '内置',
+  Timeline: '时间线',
+  Rag: 'RAG 无条件', RagSim: '相似度检索', RagHybrid: '混合阈值', Tool: 'VCP 工具',
 }
 
 function escapeHtml(s: string) {
@@ -64,10 +76,34 @@ function getVarTooltip(name: string): string {
 }
 
 // ============ 文本 ↔ HTML 转换 ============
-function makeChipHtml(name: string): string {
-  const k = classify(name)
-  const tooltip = getVarTooltip(name)
-  return `<span class="var-chip kind-${k}" contenteditable="false" draggable="true" data-var="${escapeHtml(name)}" title="${escapeHtml(tooltip)}">${escapeHtml(name)}</span>`
+// rawContent 不含两端符号（var: 'VarX' / rag: 'Nova日记本::Time::TagMemo0.65' / diary: 'VCP开发日记本'）
+function makeChipHtml(rawContent: string, format: ChipFormat = 'var'): string {
+  const primaryName = format === 'rag' ? rawContent.split('::')[0] : rawContent
+  const k = classify(primaryName, format)
+  const tooltip = format === 'var' ? getVarTooltip(primaryName) : getSpecialTooltip(rawContent, format)
+  // RAG 模式：chip 展示缩写（名称 · 模式1 · 模式2），节省空间
+  const display = format === 'rag'
+    ? primaryName + (rawContent.includes('::') ? ' · ' + rawContent.split('::').slice(1).map(m => m.replace(/^:/, '')).filter(Boolean).join(' · ') : '')
+    : rawContent
+  return `<span class="var-chip kind-${k}" contenteditable="false" draggable="true" data-var="${escapeHtml(rawContent)}" data-format="${format}" title="${escapeHtml(tooltip)}">${escapeHtml(display)}</span>`
+}
+
+function getSpecialTooltip(raw: string, format: ChipFormat): string {
+  const typeMap: Record<string, string> = {
+    rag: 'RAG 无条件检索（[[...]]）',
+    rag_sim: '相似度检索（<<...>>）',
+    rag_hybrid: '混合阈值检索（《《...》》）',
+  }
+  const [name, ...modes] = raw.split('::')
+  const modeDesc = modes.filter(Boolean).map(m => {
+    const stripped = m.replace(/^:/, '')
+    if (stripped.startsWith('TagMemo')) return `TagMemo 阈值 ${stripped.replace('TagMemo', '')}`
+    if (stripped === 'Time') return '时间衰减'
+    if (stripped === 'Group') return '语义分组'
+    if (stripped === 'Rerank') return 'RRF 重排'
+    return stripped
+  }).join(' | ')
+  return `${name}（${typeMap[format] || 'RAG'}）\n${modeDesc ? '修饰符：' + modeDesc : '无修饰符'}\n\nRAGDiaryPlugin 检索占位符，命中内容由插件注入`
 }
 
 function textToHtml(text: string): string {
@@ -79,11 +115,20 @@ function textToHtml(text: string): string {
       // 空行
     } else {
       let lastIdx = 0
-      const re = /\{\{([A-Za-z_][\w]*)\}\}/g
+      // 匹配四种占位符：{{Var}} | [[X::modes]]（无条件）| <<X>>（相似度）| 《《X》》（混合阈值）
+      const re = /(\{\{[A-Za-z_][\w]*\}\})|(\[\[[^\[\]\n]+?\]\])|(<<[^<>\n]+?>>)|(《《[^《》\n]+?》》)/g
       let m: RegExpExecArray | null
       while ((m = re.exec(line)) !== null) {
         out += escapeHtml(line.substring(lastIdx, m.index))
-        out += makeChipHtml(m[1])
+        if (m[1]) {
+          out += makeChipHtml(m[1].slice(2, -2), 'var')
+        } else if (m[2]) {
+          out += makeChipHtml(m[2].slice(2, -2), 'rag')
+        } else if (m[3]) {
+          out += makeChipHtml(m[3].slice(2, -2), 'rag_sim')
+        } else if (m[4]) {
+          out += makeChipHtml(m[4].slice(2, -2), 'rag_hybrid')
+        }
         lastIdx = m.index + m[0].length
       }
       out += escapeHtml(line.substring(lastIdx))
@@ -103,8 +148,12 @@ function htmlToText(root: HTMLElement): string {
       if (el.tagName === 'BR') {
         out += '\n'
       } else if (el.classList.contains('var-chip')) {
-        const name = el.dataset.var || el.textContent || ''
-        out += `{{${name}}}`
+        const raw = el.dataset.var || el.textContent || ''
+        const format = (el.dataset.format || 'var') as ChipFormat
+        if (format === 'rag') out += `[[${raw}]]`
+        else if (format === 'rag_sim') out += `<<${raw}>>`
+        else if (format === 'rag_hybrid') out += `《《${raw}》》`
+        else out += `{{${raw}}}`
       } else if (['DIV', 'P'].includes(el.tagName)) {
         if (out && !out.endsWith('\n')) out += '\n'
         for (const child of Array.from(el.childNodes)) walk(child)
@@ -175,22 +224,115 @@ function moveCursorToEnd() {
 const editingChipEl = ref<HTMLElement | null>(null)
 const editingChipName = ref<string>('')
 
+// ============ RAG chip 编辑器（三种 RAG 格式 + 元思考） ============
+const ragEditorVisible = ref(false)
+const ragEditorInitialType = ref<'rag' | 'rag_sim' | 'rag_hybrid'>('rag')
+const ragEditorInitialRaw = ref('')
+
+function openRagEditor(chip: HTMLElement) {
+  editingChipEl.value = chip
+  const fmt = (chip.dataset.format || 'var') as ChipFormat
+  if (fmt === 'rag' || fmt === 'rag_sim' || fmt === 'rag_hybrid') {
+    ragEditorInitialType.value = fmt
+    ragEditorInitialRaw.value = chip.dataset.var || chip.textContent || ''
+    ragEditorVisible.value = true
+  }
+}
+
+function onRagEditorSave(payload: { format: 'rag' | 'rag_sim' | 'rag_hybrid'; raw: string }) {
+  if (!editingChipEl.value) return
+  // 用新 raw 和 format 重新生成 chip HTML（保留位置 + 更新样式/符号）
+  const newHtml = makeChipHtml(payload.raw, payload.format)
+  const tmp = document.createElement('div')
+  tmp.innerHTML = newHtml
+  const newChip = tmp.firstElementChild as HTMLElement
+  if (newChip && editingChipEl.value.parentNode) {
+    editingChipEl.value.parentNode.replaceChild(newChip, editingChipEl.value)
+    editingChipEl.value = newChip
+    syncFromEditor()
+  }
+}
+
+function onRagEditorDelete() {
+  if (!editingChipEl.value) return
+  editingChipEl.value.remove()
+  editingChipEl.value = null
+  editingChipName.value = ''
+  syncFromEditor()
+}
+
 function onEditorClick(e: MouseEvent) {
   const target = e.target as HTMLElement
   if (target.classList.contains('var-chip')) {
     e.preventDefault()
+    const fmt = (target.dataset.format || 'var') as ChipFormat
+    // RAG 三种格式 chip 走专属编辑器
+    if (fmt === 'rag' || fmt === 'rag_sim' || fmt === 'rag_hybrid') {
+      openRagEditor(target)
+      return
+    }
+    // 普通 Var chip 走 picker
     editingChipEl.value = target
     editingChipName.value = target.dataset.var || target.textContent || ''
     openPicker(true)
   }
 }
 
-// 当前点击 chip 对应的占位符元数据
+// 当前点击 chip 的 format 类型
+const currentChipFormat = computed<ChipFormat>(() => {
+  return (editingChipEl.value?.dataset.format || 'var') as ChipFormat
+})
+
+// 当前点击 chip 对应的占位符元数据（仅 var 格式有，来自 placeholders API）
 const currentChipPlaceholder = computed(() => {
-  if (!editingChipName.value) return null
+  if (!editingChipName.value || currentChipFormat.value !== 'var') return null
   return placeholderMap.value.get(editingChipName.value) || null
 })
-const currentChipKind = computed(() => editingChipName.value ? classify(editingChipName.value) : 'Sys')
+
+// RAG / Tool 等的内置描述（不依赖 placeholders API）
+const currentChipSpecialInfo = computed(() => {
+  if (!editingChipName.value) return null
+  const fmt = currentChipFormat.value
+  const ragTypeLabel: Record<string, string> = {
+    rag: 'RAG 无条件检索 [[...]]',
+    rag_sim: '相似度检索 <<...>>',
+    rag_hybrid: '混合阈值检索 《《...》》',
+  }
+  if (fmt === 'rag' || fmt === 'rag_sim' || fmt === 'rag_hybrid') {
+    const [name, ...modes] = editingChipName.value.split('::')
+    const modeList = modes.filter(Boolean).map(m => {
+      const s = m.replace(/^:/, '')
+      if (s.startsWith('TagMemo')) return `TagMemo 阈值 ${s.replace('TagMemo', '')}`
+      if (s === 'Time') return '时间衰减'
+      if (s === 'Group') return '语义分组'
+      if (s === 'Rerank') return 'RRF 重排'
+      if (/^\d+\.?\d*$/.test(s)) return `K 值乘数 ${s}`
+      return s
+    })
+    return {
+      description: `${ragTypeLabel[fmt]} — 运行时由 RAGDiaryPlugin 从 ${name} 中召回相关内容`,
+      preview: modeList.length > 0 ? `修饰符：${modeList.join(' + ')}` : '无修饰符',
+    }
+  }
+  // Var 格式且名字是 VCPXxx 前缀 → 工具占位符友好提示
+  if (fmt === 'var' && editingChipName.value.startsWith('VCP')) {
+    const p = placeholderMap.value.get(editingChipName.value)
+    if (!p) {
+      return {
+        description: `VCP 工具描述占位符 — 由对应插件通过 systemPromptPlaceholders 提供`,
+        preview: `当前未安装 ${editingChipName.value.slice(3)} 插件，占位符会展开为空串（不影响提示词其他部分）`,
+      }
+    }
+  }
+  return null
+})
+
+const currentChipKind = computed(() => {
+  if (!editingChipName.value) return 'Sys'
+  const fmt = currentChipFormat.value
+  const name = fmt === 'rag' ? editingChipName.value.split('::')[0] : editingChipName.value
+  return classify(name, fmt)
+})
 
 // ============ chip 拖拽 ============
 let draggingChip: HTMLElement | null = null
@@ -500,7 +642,11 @@ const exampleVarLiteral = '{' + '{' + 'AgentName' + '}' + '}'
               <code class="cc-name">{{ editingChipName }}</code>
               <span class="cc-kind-tag">{{ KIND_LABEL[currentChipKind] }}</span>
             </div>
-            <div v-if="currentChipPlaceholder">
+            <div v-if="currentChipSpecialInfo">
+              <p class="cc-desc">{{ currentChipSpecialInfo.description }}</p>
+              <p class="cc-preview">→ {{ currentChipSpecialInfo.preview }}</p>
+            </div>
+            <div v-else-if="currentChipPlaceholder">
               <p v-if="currentChipPlaceholder.description" class="cc-desc">{{ currentChipPlaceholder.description }}</p>
               <p v-if="currentChipPlaceholder.preview" class="cc-preview">→ {{ currentChipPlaceholder.preview }}</p>
             </div>
@@ -578,6 +724,15 @@ const exampleVarLiteral = '{' + '{' + 'AgentName' + '}' + '}'
         <button class="btn btn-ghost" @click="pickerOpen = false; editingChipEl = null" type="button">取消</button>
       </template>
     </BaseModal>
+
+    <!-- RAG / DiaryAll / 元思考 专属编辑器 -->
+    <RagChipEditor
+      v-model="ragEditorVisible"
+      :initial-type="ragEditorInitialType"
+      :initial-raw="ragEditorInitialRaw"
+      @save="onRagEditorSave"
+      @delete="onRagEditorDelete"
+    />
   </div>
 </template>
 
@@ -713,6 +868,11 @@ const exampleVarLiteral = '{' + '{' + 'AgentName' + '}' + '}'
   &.kind-Tar { background: rgba(106, 120, 212, 0.18); color: #4956b5; border: 1px solid rgba(106, 120, 212, 0.4); }
   &.kind-Var { background: rgba(92, 178, 163, 0.18); color: #3d8d80; border: 1px solid rgba(92, 178, 163, 0.4); }
   &.kind-Sar { background: rgba(230, 138, 76, 0.18); color: #b96b2f; border: 1px solid rgba(230, 138, 76, 0.4); }
+  &.kind-Timeline { background: rgba(217, 119, 87, 0.18); color: #b8522e; border: 1px solid rgba(217, 119, 87, 0.4); }
+  &.kind-Rag { background: rgba(139, 92, 246, 0.18); color: #6d3fc5; border: 1px solid rgba(139, 92, 246, 0.4); }
+  &.kind-RagSim { background: rgba(99, 102, 241, 0.18); color: #4c4fd4; border: 1px solid rgba(99, 102, 241, 0.4); }
+  &.kind-RagHybrid { background: rgba(217, 70, 239, 0.18); color: #a732c8; border: 1px solid rgba(217, 70, 239, 0.4); }
+  &.kind-Tool { background: rgba(14, 165, 233, 0.15); color: #0284c7; border: 1px solid rgba(14, 165, 233, 0.35); }
   &.kind-Agent { background: rgba(212, 116, 142, 0.18); color: #b25a76; border: 1px solid rgba(212, 116, 142, 0.4); }
   &.kind-Sys { background: rgba(136, 136, 136, 0.18); color: #555; border: 1px solid rgba(136, 136, 136, 0.4); }
 }
@@ -737,6 +897,11 @@ const exampleVarLiteral = '{' + '{' + 'AgentName' + '}' + '}'
   &.kind-Tar { border-color: rgba(106, 120, 212, 0.5); background: linear-gradient(135deg, rgba(106, 120, 212, 0.08), rgba(106, 120, 212, 0.02)); }
   &.kind-Var { border-color: rgba(92, 178, 163, 0.5); background: linear-gradient(135deg, rgba(92, 178, 163, 0.08), rgba(92, 178, 163, 0.02)); }
   &.kind-Sar { border-color: rgba(230, 138, 76, 0.5); background: linear-gradient(135deg, rgba(230, 138, 76, 0.08), rgba(230, 138, 76, 0.02)); }
+  &.kind-Timeline { border-color: rgba(217, 119, 87, 0.5); background: linear-gradient(135deg, rgba(217, 119, 87, 0.08), rgba(217, 119, 87, 0.02)); }
+  &.kind-Rag { border-color: rgba(139, 92, 246, 0.5); background: linear-gradient(135deg, rgba(139, 92, 246, 0.08), rgba(139, 92, 246, 0.02)); }
+  &.kind-RagSim { border-color: rgba(99, 102, 241, 0.5); background: linear-gradient(135deg, rgba(99, 102, 241, 0.08), rgba(99, 102, 241, 0.02)); }
+  &.kind-RagHybrid { border-color: rgba(217, 70, 239, 0.5); background: linear-gradient(135deg, rgba(217, 70, 239, 0.08), rgba(217, 70, 239, 0.02)); }
+  &.kind-Tool { border-color: rgba(14, 165, 233, 0.5); background: linear-gradient(135deg, rgba(14, 165, 233, 0.08), rgba(14, 165, 233, 0.02)); }
   &.kind-Agent { border-color: rgba(212, 116, 142, 0.5); background: linear-gradient(135deg, rgba(212, 116, 142, 0.08), rgba(212, 116, 142, 0.02)); }
   &.kind-Sys { border-color: rgba(136, 136, 136, 0.5); }
   .cc-icon {
@@ -784,6 +949,11 @@ const exampleVarLiteral = '{' + '{' + 'AgentName' + '}' + '}'
   &.kind-Tar .cc-kind-tag { background: #6a78d4; }
   &.kind-Var .cc-kind-tag { background: #5cb2a3; }
   &.kind-Sar .cc-kind-tag { background: #e68a4c; }
+  &.kind-Timeline .cc-kind-tag { background: #d97757; }
+  &.kind-Rag .cc-kind-tag { background: #8b5cf6; }
+  &.kind-RagSim .cc-kind-tag { background: #6366f1; }
+  &.kind-RagHybrid .cc-kind-tag { background: #d946ef; }
+  &.kind-Tool .cc-kind-tag { background: #0ea5e9; }
   &.kind-Agent .cc-kind-tag { background: #d4748e; }
   &.kind-Sys .cc-kind-tag { background: #888; }
   .cc-desc {
