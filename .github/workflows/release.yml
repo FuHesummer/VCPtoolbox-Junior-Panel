@@ -105,7 +105,10 @@ jobs:
 
             查阅 [PANEL_DEVELOPER_GUIDE.md](https://github.com/FuHesummer/VCPtoolbox-Junior-Panel/blob/main/PANEL_DEVELOPER_GUIDE.md)
           draft: false
-          prerelease: ${{ steps.version.outputs.prerelease == 'true' }}
+          # beta 版仍视为 latest（宝宝决策：未发给用户时 latest=最新 beta）
+          # 后端 panelUpdater 的 /releases/latest API 能拉到 beta 版
+          prerelease: false
+          make_latest: true
           files: |
             AdminPanel-${{ steps.version.outputs.tag }}.zip
             AdminPanel.zip
