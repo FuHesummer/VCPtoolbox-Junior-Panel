@@ -131,9 +131,60 @@
                     <EmptyState icon="description_off" message="先为此 Agent 绑定一个提示词文件" />
                   </div>
                   <template v-else>
+                    <!-- 工具系统提示卡片（首次可见，可关闭） -->
+                    <div v-if="!toolsHintDismissed" class="tools-hint card-alt">
+                      <div class="th-icon">
+                        <span class="material-symbols-outlined">tips_and_updates</span>
+                      </div>
+                      <div class="th-body">
+                        <div class="th-title">让 Agent 使用工具？</div>
+                        <ul class="th-list">
+                          <li>
+                            <strong>🔌 插件工具（最省心）</strong>：提示词里插入
+                            <code>{{ allToolsLiteral }}</code>
+                            —— 自动注入<strong>所有已装插件</strong>的工具描述，装/卸插件零维护。
+                            点编辑器工具栏的
+                            <span class="th-btn-demo tools-all">
+                              <span class="material-symbols-outlined">auto_awesome</span>一键全工具
+                            </span>
+                            即可。
+                          </li>
+                          <li>
+                            <strong>🎯 精细控制</strong>：单独插入
+                            <code>{{ singleToolLiteral }}</code>
+                            只暴露指定插件（示例：<code>{{ toolExampleLiteral }}</code>）。
+                            通过「插入变量 → 工具描述」分类浏览。
+                          </li>
+                          <li>
+                            <strong>📦 Toolbox 自定义工具集</strong>：在
+                            <router-link :to="{ name: 'toolbox' }" class="th-link">Toolbox 管理</router-link>
+                            里创建自定义工具集合（支持 Fold 动态折叠注入），然后在提示词插入
+                            <code>{{ toolboxLiteral }}</code>
+                            或
+                            <code>{{ toolboxPrefixLiteral }}</code>
+                            引用。Toolbox 带<strong>全局去重 + 循环保护</strong>，适合大型工具清单。点编辑器工具栏
+                            <span class="th-btn-demo tools-box">
+                              <span class="material-symbols-outlined">inventory_2</span>Toolbox
+                            </span>
+                            快速插入。
+                          </li>
+                          <li>
+                            <strong>⚡ 工具调用格式</strong>：AI 会用 <code>「始」tool_name:xxx「末」</code>
+                            自动调用，无需你手写协议。
+                          </li>
+                        </ul>
+                      </div>
+                      <button class="th-close" @click="dismissToolsHint" type="button" title="不再提示（保存状态到浏览器）">
+                        <span class="material-symbols-outlined">close</span>
+                      </button>
+                    </div>
+
                     <div class="editor-toolbar">
                       <span class="file-badge">{{ editFile }}</span>
                       <span v-if="fileDirty" class="dirty-dot">● 未保存</span>
+                      <button v-if="toolsHintDismissed" class="btn btn-ghost mini" @click="resetToolsHint" type="button" title="重新显示工具系统提示">
+                        <span class="material-symbols-outlined">help</span>
+                      </button>
                       <button class="btn" @click="saveFile" :disabled="!fileDirty || fileLoading">保存提示词</button>
                     </div>
                     <PromptEditor v-model="fileContent" :rows="22" :placeholder="promptEditorPlaceholder" />
@@ -319,6 +370,25 @@ const manuallyDirty = ref(false)
 const fileContent = ref('')
 const fileOriginal = ref('')
 const fileLoading = ref(false)
+
+// 工具系统提示卡片 dismiss 状态（localStorage 持久化）
+const TOOLS_HINT_KEY = 'vcp-panel:agent-tools-hint-dismissed'
+const toolsHintDismissed = ref(localStorage.getItem(TOOLS_HINT_KEY) === '1')
+function dismissToolsHint() {
+  toolsHintDismissed.value = true
+  localStorage.setItem(TOOLS_HINT_KEY, '1')
+}
+function resetToolsHint() {
+  toolsHintDismissed.value = false
+  localStorage.removeItem(TOOLS_HINT_KEY)
+}
+
+// Vue 模板 mustache 嵌套冲突规避：含 {{ 的字面量走字符串拼接
+const allToolsLiteral = '{' + '{VCPAllTools}' + '}'
+const singleToolLiteral = '{' + '{VCP插件名}' + '}'
+const toolExampleLiteral = '{' + '{VCPDailyNoteEditor}' + '}'
+const toolboxLiteral = '{' + '{Toolbox别名}' + '}'
+const toolboxPrefixLiteral = '{' + '{toolbox:Toolbox别名}' + '}'
 
 const search = ref('')
 const activeTab = ref('prompt')
@@ -1049,6 +1119,87 @@ watch([editAlias, editFile, notebookList], () => {
   }
 
   .btn { margin-left: auto; }
+  .btn-ghost.mini { padding: 4px 8px; margin-left: auto; }
+  .btn-ghost.mini + .btn { margin-left: 0; }
+}
+
+/* ============ 工具系统提示卡片 ============ */
+.tools-hint {
+  display: flex;
+  gap: 12px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+  background: linear-gradient(135deg, rgba(14, 165, 233, 0.08), rgba(99, 102, 241, 0.08));
+  border: 1px solid rgba(14, 165, 233, 0.25);
+  border-left: 3px solid #0ea5e9;
+  border-radius: var(--radius-md);
+
+  .th-icon {
+    flex-shrink: 0;
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #0ea5e9, #6366f1);
+    color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    .material-symbols-outlined { font-size: 18px; }
+  }
+  .th-body { flex: 1; min-width: 0; }
+  .th-title {
+    font-weight: 600;
+    color: var(--primary-text);
+    margin-bottom: 6px;
+    font-size: 13px;
+  }
+  .th-list {
+    margin: 0;
+    padding-left: 18px;
+    font-size: 12px;
+    color: var(--secondary-text);
+    line-height: 1.7;
+    li { margin-bottom: 2px; }
+    code {
+      background: var(--code-bg, rgba(0, 0, 0, 0.06));
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-size: 11px;
+      color: var(--highlight-text);
+      font-family: 'JetBrains Mono', Consolas, monospace;
+    }
+    strong { color: var(--primary-text); }
+  }
+  .th-btn-demo {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 1px 8px;
+    color: #fff;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 600;
+    vertical-align: middle;
+    &.tools-all { background: linear-gradient(135deg, #0ea5e9, #6366f1); }
+    &.tools-box { background: linear-gradient(135deg, #14b8a6, #22c55e); }
+    .material-symbols-outlined { font-size: 12px; }
+  }
+  .th-link {
+    color: var(--highlight-text);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    &:hover { opacity: 0.85; }
+  }
+  .th-close {
+    flex-shrink: 0;
+    width: 24px; height: 24px;
+    border: none;
+    background: transparent;
+    color: var(--secondary-text);
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.12s;
+    &:hover { background: rgba(0, 0, 0, 0.08); color: var(--primary-text); }
+    .material-symbols-outlined { font-size: 16px; }
+  }
 }
 
 .tip {

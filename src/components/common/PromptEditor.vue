@@ -10,6 +10,7 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import BaseModal from '@/components/common/BaseModal.vue'
 import RagChipEditor from '@/components/common/RagChipEditor.vue'
 import { getPlaceholders, type PlaceholderItem, type PlaceholderType } from '@/api/config'
+import { getToolboxMap, type ToolboxMap } from '@/api/toolbox'
 
 const props = defineProps<{
   modelValue: string
@@ -26,14 +27,22 @@ const editorEl = ref<HTMLDivElement | null>(null)
 let internalUpdate = false
 
 // ============ 占位符分类 ============
-type VarKind = 'Tar' | 'Var' | 'Sar' | 'Agent' | 'Sys' | 'Timeline' | 'Rag' | 'RagSim' | 'RagHybrid' | 'Tool'
+type VarKind = 'Tar' | 'Var' | 'Sar' | 'Agent' | 'Sys' | 'Timeline' | 'Rag' | 'RagSim' | 'RagHybrid' | 'Tool' | 'Toolbox'
 type ChipFormat = 'var' | 'rag' | 'rag_sim' | 'rag_hybrid'
+
+// Toolbox alias 集合（运行期从后端拉，classify 用于识别 {{alias}} / {{toolbox:alias}}）
+const toolboxAliases = ref<Set<string>>(new Set())
+const toolboxDescMap = ref<Record<string, string>>({})
 
 function classify(name: string, format: ChipFormat = 'var'): VarKind {
   // RAG 三种语法按格式分类（不看名字）
   if (format === 'rag') return 'Rag'
   if (format === 'rag_sim') return 'RagSim'
   if (format === 'rag_hybrid') return 'RagHybrid'
+  // toolbox:alias 显式前缀 → Toolbox
+  if (name.startsWith('toolbox:')) return 'Toolbox'
+  // 无前缀 alias 命中 toolbox 集合 → Toolbox
+  if (toolboxAliases.value.has(name)) return 'Toolbox'
   // VarTimeline{Agent} 是 TimelineOrganizer 插件维护的 Agent 生平时间线，归专属类
   if (name.startsWith('VarTimeline')) return 'Timeline'
   if (name.startsWith('Tar')) return 'Tar'
@@ -49,6 +58,7 @@ const KIND_LABEL: Record<VarKind, string> = {
   Tar: '系统级', Var: '通用', Sar: '模型条件', Agent: 'Agent', Sys: '内置',
   Timeline: '时间线',
   Rag: 'RAG 无条件', RagSim: '相似度检索', RagHybrid: '混合阈值', Tool: 'VCP 工具',
+  Toolbox: 'Toolbox 工具集',
 }
 
 function escapeHtml(s: string) {
@@ -68,6 +78,13 @@ const placeholderMap = computed(() => {
 })
 
 function getVarTooltip(name: string): string {
+  // Toolbox 优先识别（支持 {{alias}} 和 {{toolbox:alias}} 两种格式）
+  const toolboxName = name.startsWith('toolbox:') ? name.slice(8) : name
+  if (toolboxAliases.value.has(toolboxName)) {
+    const desc = toolboxDescMap.value[toolboxName]
+    const descLine = desc ? `\n${desc}` : ''
+    return `${name}（Toolbox 工具集）${descLine}\n\n特性：全局去重 + 循环保护 + Fold 动态注入（仅特权角色展开）\n点击替换 / 拖拽移动 / Delete 删除`
+  }
   const p = placeholderMap.value.get(name)
   if (!p) return `${name}（${KIND_LABEL[classify(name)]}变量） — 点击替换 / 拖拽移动`
   const desc = p.description ? `\n${p.description}` : ''
@@ -115,8 +132,8 @@ function textToHtml(text: string): string {
       // 空行
     } else {
       let lastIdx = 0
-      // 匹配四种占位符：{{Var}} | [[X::modes]]（无条件）| <<X>>（相似度）| 《《X》》（混合阈值）
-      const re = /(\{\{[A-Za-z_][\w]*\}\})|(\[\[[^\[\]\n]+?\]\])|(<<[^<>\n]+?>>)|(《《[^《》\n]+?》》)/g
+      // 匹配四种占位符：{{Var}} / {{toolbox:alias}} | [[X::modes]]（无条件）| <<X>>（相似度）| 《《X》》（混合阈值）
+      const re = /(\{\{(?:toolbox:)?[A-Za-z_][\w]*\}\})|(\[\[[^\[\]\n]+?\]\])|(<<[^<>\n]+?>>)|(《《[^《》\n]+?》》)/g
       let m: RegExpExecArray | null
       while ((m = re.exec(line)) !== null) {
         out += escapeHtml(line.substring(lastIdx, m.index))
@@ -187,7 +204,7 @@ function onEditorInput() {
   setTimeout(() => {
     if (!editorEl.value) return
     const html = editorEl.value.innerHTML
-    if (/\{\{[A-Za-z_][\w]*\}\}/.test(html)) {
+    if (/\{\{(?:toolbox:)?[A-Za-z_][\w]*\}\}/.test(html)) {
       const cursorAtEnd = isCursorAtEnd()
       renderToEditor()
       if (cursorAtEnd) moveCursorToEnd()
@@ -421,7 +438,74 @@ onMounted(() => {
       if (mode.value === 'rich') renderToEditor()
     }).catch(() => {})
   }
+  // 预加载 Toolbox 工具集列表（classify 用于识别 alias chip）
+  loadToolboxMap()
 })
+
+// ============ Toolbox 工具集加载 ============
+const toolboxLoading = ref(false)
+const toolboxDropdownOpen = ref(false)
+async function loadToolboxMap() {
+  if (toolboxLoading.value) return
+  toolboxLoading.value = true
+  try {
+    const map = (await getToolboxMap()) as ToolboxMap
+    const aliases = new Set<string>()
+    const descMap: Record<string, string> = {}
+    for (const [alias, entry] of Object.entries(map || {})) {
+      aliases.add(alias)
+      descMap[alias] = entry?.description || ''
+    }
+    toolboxAliases.value = aliases
+    toolboxDescMap.value = descMap
+    // 重新渲染让已有 chip 的 Toolbox 识别生效
+    if (mode.value === 'rich') renderToEditor()
+  } catch {
+    // 无 toolbox 也不阻断（用户可能还没创建）
+  } finally {
+    toolboxLoading.value = false
+  }
+}
+
+// Toolbox 列表（按 description 加别名排序）
+const toolboxList = computed(() =>
+  Array.from(toolboxAliases.value).sort().map(alias => ({
+    alias,
+    description: toolboxDescMap.value[alias] || '',
+  })),
+)
+
+function insertToolbox(alias: string) {
+  toolboxDropdownOpen.value = false
+  if (mode.value === 'rich' && editorEl.value) {
+    const tmp = document.createElement('div')
+    tmp.innerHTML = makeChipHtml(alias)
+    const chip = tmp.firstChild as HTMLElement
+    const sel = window.getSelection()
+    if (sel && sel.rangeCount > 0 && editorEl.value.contains(sel.anchorNode)) {
+      const range = sel.getRangeAt(0)
+      range.deleteContents()
+      range.insertNode(chip)
+      range.setStartAfter(chip)
+      range.collapse(true)
+      sel.removeAllRanges()
+      sel.addRange(range)
+    } else {
+      editorEl.value.appendChild(chip)
+      moveCursorToEnd()
+    }
+    syncFromEditor()
+  } else {
+    rawText.value = (props.modelValue || '') + '{' + '{' + alias + '}' + '}'
+  }
+}
+
+function toggleToolboxDropdown() {
+  toolboxDropdownOpen.value = !toolboxDropdownOpen.value
+  if (toolboxDropdownOpen.value && toolboxAliases.value.size === 0) {
+    loadToolboxMap()
+  }
+}
 
 // ============ 高级模式 textarea ============
 const rawText = computed({
@@ -573,6 +657,32 @@ function deleteEditingChip() {
 }
 
 const exampleVarLiteral = '{' + '{' + 'AgentName' + '}' + '}'
+
+// 一键插入 {{VCPAllTools}}：让 Agent 使用所有已装插件工具（最常用）
+function insertAllTools() {
+  const name = 'VCPAllTools'
+  if (mode.value === 'rich' && editorEl.value) {
+    const tmp = document.createElement('div')
+    tmp.innerHTML = makeChipHtml(name)
+    const chip = tmp.firstChild as HTMLElement
+    const sel = window.getSelection()
+    if (sel && sel.rangeCount > 0 && editorEl.value.contains(sel.anchorNode)) {
+      const range = sel.getRangeAt(0)
+      range.deleteContents()
+      range.insertNode(chip)
+      range.setStartAfter(chip)
+      range.collapse(true)
+      sel.removeAllRanges()
+      sel.addRange(range)
+    } else {
+      editorEl.value.appendChild(chip)
+      moveCursorToEnd()
+    }
+    syncFromEditor()
+  } else {
+    rawText.value = (props.modelValue || '') + '{' + '{' + name + '}' + '}'
+  }
+}
 </script>
 
 <template>
@@ -594,6 +704,59 @@ const exampleVarLiteral = '{' + '{' + 'AgentName' + '}' + '}'
         <span class="material-symbols-outlined">add_circle</span>
         插入变量
       </button>
+
+      <button
+        class="btn-all-tools"
+        @click="insertAllTools"
+        type="button"
+        title="在光标处插入 {{VCPAllTools}}，让 Agent 自动使用所有已装插件工具"
+      >
+        <span class="material-symbols-outlined">auto_awesome</span>
+        一键全工具
+      </button>
+
+      <!-- Toolbox 工具集下拉 -->
+      <div class="toolbox-wrap">
+        <button
+          class="btn-toolbox"
+          @click="toggleToolboxDropdown"
+          type="button"
+          :title="toolboxList.length
+            ? `插入 Toolbox 工具集（共 ${toolboxList.length} 个）`
+            : '还没有 Toolbox，先去 Toolbox 管理创建'"
+        >
+          <span class="material-symbols-outlined">inventory_2</span>
+          Toolbox
+          <span v-if="toolboxList.length" class="tb-count">{{ toolboxList.length }}</span>
+          <span class="material-symbols-outlined tb-caret">expand_more</span>
+        </button>
+        <div v-if="toolboxDropdownOpen" class="tb-dropdown" @click.self="toolboxDropdownOpen = false">
+          <div class="tb-menu">
+            <div class="tb-head">
+              <span>选择 Toolbox 工具集</span>
+              <button class="tb-close" @click="toolboxDropdownOpen = false" type="button">
+                <span class="material-symbols-outlined">close</span>
+              </button>
+            </div>
+            <div v-if="toolboxLoading" class="tb-empty">加载中…</div>
+            <div v-else-if="!toolboxList.length" class="tb-empty">
+              还没有 Toolbox，先去
+              <router-link :to="{ name: 'toolbox' }" @click="toolboxDropdownOpen = false">Toolbox 管理</router-link>
+              创建嘛
+            </div>
+            <ul v-else class="tb-list">
+              <li v-for="t in toolboxList" :key="t.alias" @click="insertToolbox(t.alias)" class="tb-item">
+                <span class="tb-alias-dot"></span>
+                <div class="tb-info">
+                  <strong class="tb-alias">{{ t.alias }}</strong>
+                  <span v-if="t.description" class="tb-desc">{{ t.description }}</span>
+                </div>
+                <span class="material-symbols-outlined tb-arrow">north_east</span>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
 
       <span class="hint">
         💡 鼠标停留徽章看内容；点击徽章可替换；按住拖动改位置
@@ -792,6 +955,145 @@ const exampleVarLiteral = '{' + '{' + 'AgentName' + '}' + '}'
   &:hover { filter: brightness(1.08); transform: translateY(-1px); }
   .material-symbols-outlined { font-size: 16px; }
 }
+.btn-all-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: linear-gradient(135deg, #0ea5e9, #6366f1);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-pill);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 2px 5px rgba(14, 165, 233, 0.25);
+  transition: all 0.12s;
+  &:hover { filter: brightness(1.12); transform: translateY(-1px); }
+  .material-symbols-outlined { font-size: 16px; }
+}
+.toolbox-wrap {
+  position: relative;
+  display: inline-flex;
+}
+.btn-toolbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: linear-gradient(135deg, #14b8a6, #22c55e);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-pill);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 2px 5px rgba(20, 184, 166, 0.25);
+  transition: all 0.12s;
+  &:hover { filter: brightness(1.12); transform: translateY(-1px); }
+  .material-symbols-outlined { font-size: 16px; }
+  .tb-caret { font-size: 14px; margin-left: -2px; opacity: 0.85; }
+  .tb-count {
+    background: rgba(255, 255, 255, 0.3);
+    padding: 0 6px;
+    border-radius: 8px;
+    font-size: 11px;
+  }
+}
+.tb-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 100;
+  min-width: 320px;
+  max-width: 480px;
+}
+.tb-menu {
+  background: var(--primary-bg);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  overflow: hidden;
+  animation: tbFadeIn 0.12s ease-out;
+}
+@keyframes tbFadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.tb-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: linear-gradient(135deg, rgba(20, 184, 166, 0.12), rgba(34, 197, 94, 0.06));
+  border-bottom: 1px solid var(--border-color);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--primary-text);
+  .tb-close {
+    background: transparent; border: none; cursor: pointer;
+    color: var(--secondary-text);
+    width: 22px; height: 22px;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 50%;
+    &:hover { background: rgba(0, 0, 0, 0.06); }
+    .material-symbols-outlined { font-size: 15px; }
+  }
+}
+.tb-empty {
+  padding: 20px 14px;
+  text-align: center;
+  color: var(--secondary-text);
+  font-size: 12px;
+  a { color: var(--highlight-text); text-decoration: underline; }
+}
+.tb-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0;
+  max-height: 340px;
+  overflow-y: auto;
+}
+.tb-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  cursor: pointer;
+  transition: background 0.08s;
+  &:hover {
+    background: linear-gradient(135deg, rgba(20, 184, 166, 0.08), rgba(34, 197, 94, 0.04));
+    .tb-arrow { opacity: 1; transform: translateX(2px) translateY(-2px); }
+  }
+  .tb-alias-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #14b8a6, #22c55e);
+    flex-shrink: 0;
+  }
+  .tb-info { flex: 1; min-width: 0; }
+  .tb-alias {
+    display: block;
+    font-size: 12.5px;
+    color: var(--primary-text);
+    font-family: 'JetBrains Mono', Consolas, monospace;
+  }
+  .tb-desc {
+    display: block;
+    font-size: 11px;
+    color: var(--secondary-text);
+    margin-top: 2px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .tb-arrow {
+    font-size: 14px;
+    color: #14b8a6;
+    opacity: 0.3;
+    transition: all 0.12s;
+  }
+}
 .hint {
   flex: 1;
   font-size: 11px;
@@ -873,6 +1175,7 @@ const exampleVarLiteral = '{' + '{' + 'AgentName' + '}' + '}'
   &.kind-RagSim { background: rgba(99, 102, 241, 0.18); color: #4c4fd4; border: 1px solid rgba(99, 102, 241, 0.4); }
   &.kind-RagHybrid { background: rgba(217, 70, 239, 0.18); color: #a732c8; border: 1px solid rgba(217, 70, 239, 0.4); }
   &.kind-Tool { background: rgba(14, 165, 233, 0.15); color: #0284c7; border: 1px solid rgba(14, 165, 233, 0.35); }
+  &.kind-Toolbox { background: linear-gradient(135deg, rgba(20, 184, 166, 0.18), rgba(34, 197, 94, 0.12)); color: #0d9488; border: 1px solid rgba(20, 184, 166, 0.4); }
   &.kind-Agent { background: rgba(212, 116, 142, 0.18); color: #b25a76; border: 1px solid rgba(212, 116, 142, 0.4); }
   &.kind-Sys { background: rgba(136, 136, 136, 0.18); color: #555; border: 1px solid rgba(136, 136, 136, 0.4); }
 }
@@ -902,6 +1205,7 @@ const exampleVarLiteral = '{' + '{' + 'AgentName' + '}' + '}'
   &.kind-RagSim { border-color: rgba(99, 102, 241, 0.5); background: linear-gradient(135deg, rgba(99, 102, 241, 0.08), rgba(99, 102, 241, 0.02)); }
   &.kind-RagHybrid { border-color: rgba(217, 70, 239, 0.5); background: linear-gradient(135deg, rgba(217, 70, 239, 0.08), rgba(217, 70, 239, 0.02)); }
   &.kind-Tool { border-color: rgba(14, 165, 233, 0.5); background: linear-gradient(135deg, rgba(14, 165, 233, 0.08), rgba(14, 165, 233, 0.02)); }
+  &.kind-Toolbox { border-color: rgba(20, 184, 166, 0.5); background: linear-gradient(135deg, rgba(20, 184, 166, 0.08), rgba(34, 197, 94, 0.02)); }
   &.kind-Agent { border-color: rgba(212, 116, 142, 0.5); background: linear-gradient(135deg, rgba(212, 116, 142, 0.08), rgba(212, 116, 142, 0.02)); }
   &.kind-Sys { border-color: rgba(136, 136, 136, 0.5); }
   .cc-icon {
@@ -954,6 +1258,7 @@ const exampleVarLiteral = '{' + '{' + 'AgentName' + '}' + '}'
   &.kind-RagSim .cc-kind-tag { background: #6366f1; }
   &.kind-RagHybrid .cc-kind-tag { background: #d946ef; }
   &.kind-Tool .cc-kind-tag { background: #0ea5e9; }
+  &.kind-Toolbox .cc-kind-tag { background: linear-gradient(135deg, #14b8a6, #22c55e); }
   &.kind-Agent .cc-kind-tag { background: #d4748e; }
   &.kind-Sys .cc-kind-tag { background: #888; }
   .cc-desc {
