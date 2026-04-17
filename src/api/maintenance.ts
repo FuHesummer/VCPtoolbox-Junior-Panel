@@ -75,7 +75,7 @@ export function getJob(id: string) {
 export function runScript(scriptId: string, args: Record<string, string> = {}) {
   return apiFetch<RunResponse>('/admin_api/maintenance/run', {
     method: 'POST',
-    body: JSON.stringify({ scriptId, args }),
+    body: { scriptId, args },
     showLoader: false,
     suppressErrorToast: true,
   })

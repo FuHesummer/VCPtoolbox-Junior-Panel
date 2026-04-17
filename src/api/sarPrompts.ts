@@ -20,7 +20,7 @@ export function saveSarPrompts(items: SarPromptItem[], restart = false) {
     `/admin_api/sar-prompts${qs}`,
     {
       method: 'POST',
-      body: JSON.stringify({ items }),
+      body: { items },
       showLoader: false,
     },
   )
