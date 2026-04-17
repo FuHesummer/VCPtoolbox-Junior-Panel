@@ -104,16 +104,45 @@
         </ul>
       </aside>
 
-      <!-- ===================== 中间：笔记卡片 ===================== -->
+      <!-- ===================== 中间：笔记卡片 / 编辑器 ===================== -->
       <section class="notes card">
-        <div v-if="searching" class="notes-header">
+        <!-- 编辑模式：富文本（Tag 行渲染为 chip） -->
+        <div v-if="editingFile" class="inline-editor">
+          <div
+            ref="richEditorEl"
+            class="rich-note-editor"
+            contenteditable="true"
+            spellcheck="false"
+            @input="onRichEditorInput"
+            @blur="onRichEditorInput"
+          ></div>
+        </div>
+        <!-- 列表模式 -->
+        <div v-else-if="searching" class="notes-header">
           <strong>
             搜索结果：&ldquo;{{ activeSearchTerm }}&rdquo;
             <span v-if="searchMeta" class="muted">（命中 {{ searchMeta.total }}{{ searchMeta.limited ? '+' : '' }}）</span>
           </strong>
         </div>
-        <div v-else-if="selectedFolder" class="notes-header">
+        <div v-else-if="selectedFolder && !editingFile" class="notes-header">
           <strong>{{ selectedFolder }}</strong>
+          <span style="flex:1"></span>
+          <select
+            v-if="fileTags.length"
+            class="input compact"
+            style="max-width:160px"
+            :value="localFilter"
+            @change="localFilter = ($event.target as HTMLSelectElement).value"
+          >
+            <option value="">全部（{{ filteredNotes.length }}）</option>
+            <option v-for="ft in fileTags.slice(0, 50)" :key="ft.tag" :value="ft.tag">{{ ft.tag }}</option>
+          </select>
+          <input
+            v-model="localFilter"
+            class="input compact"
+            placeholder="搜索..."
+            style="max-width:120px"
+          />
           <div class="notes-toolbar">
             <select
               v-if="selectedNotes.size"
@@ -149,6 +178,7 @@
           </div>
         </div>
 
+        <template v-if="!editingFile">
         <div v-if="loadingNotes" class="loading-hint">
           <span class="material-symbols-outlined spinning">progress_activity</span> 正在加载笔记...
         </div>
@@ -160,7 +190,7 @@
 
         <div v-else class="note-grid">
           <article
-            v-for="n in filteredNotes"
+            v-for="n in paginatedNotes"
             :key="(n.folderName || selectedFolder) + '/' + n.name"
             class="note-card"
             :class="{ selected: isSelected(n) }"
@@ -189,24 +219,68 @@
             </footer>
           </article>
         </div>
+        <!-- 分页 -->
+        <footer v-if="!editingFile && totalPages > 1" class="notes-pager">
+          <button class="btn btn-ghost compact" :disabled="currentPage <= 1" @click="goPage(1)">首页</button>
+          <button class="btn btn-ghost compact" :disabled="currentPage <= 1" @click="goPage(currentPage - 1)">上一页</button>
+          <input
+            type="number"
+            class="input compact pager-jump"
+            :min="1" :max="totalPages"
+            :value="currentPage"
+            @change="goPage(Number(($event.target as HTMLInputElement).value))"
+          />
+          <span class="pager-info">/ {{ totalPages }} 页（{{ localFilteredNotes.length }} 条）</span>
+          <button class="btn btn-ghost compact" :disabled="currentPage >= totalPages" @click="goPage(currentPage + 1)">下一页</button>
+          <button class="btn btn-ghost compact" :disabled="currentPage >= totalPages" @click="goPage(totalPages)">末页</button>
+        </footer>
+        </template>
       </section>
 
-      <!-- ===================== 右侧：编辑器 / RAG 配置 ===================== -->
+      <!-- ===================== 右侧：笔记详情 / RAG 配置 ===================== -->
       <section class="right card">
-        <!-- 编辑器 -->
-        <div v-if="editingFile" class="editor">
-          <div class="editor-header">
-            <strong>{{ editingFile.folder }} / {{ editingFile.name }}</strong>
-            <div class="actions">
-              <button class="btn btn-ghost compact" @click="closeEditor">关闭</button>
-              <button class="btn compact" :disabled="!noteDirty" @click="saveNoteContent">保存</button>
-            </div>
+        <!-- 笔记详情（编辑时） -->
+        <div v-if="editingFile" class="note-detail-panel">
+          <button class="btn btn-ghost compact" @click="closeEditor" style="margin-bottom:8px">
+            <span class="material-symbols-outlined">arrow_back</span>返回列表
+          </button>
+          <div class="detail-meta">
+            <p class="muted small">{{ editingFile.folder }} · {{ noteContent.length }} 字</p>
           </div>
-          <CodeEditor v-model="noteContent" :rows="26" />
-          <p class="editor-hint">未做 Markdown 渲染 — 仅纯文本/源码编辑</p>
+
+          <div class="detail-tags">
+            <header class="row between">
+              <strong class="small">文件标签</strong>
+              <button class="btn btn-ghost compact" @click="addTagToNote">
+                <span class="material-symbols-outlined">add</span>
+              </button>
+            </header>
+            <div class="file-tags-chips" style="margin-top:6px">
+              <span
+                v-for="(tag, i) in editingNoteTags"
+                :key="tag"
+                class="file-tag-chip editable-tag"
+              >{{ tag }}<button class="tag-remove" @click="removeTagFromNote(i)">×</button></span>
+            </div>
+            <input
+              v-if="showNoteTagInput"
+              v-model="newNoteTag"
+              class="input compact"
+              placeholder="输入标签名，回车添加"
+              style="margin-top:6px"
+              @keydown.enter="confirmAddNoteTag"
+              @blur="showNoteTagInput = false"
+              ref="noteTagInputEl"
+            />
+          </div>
+
+          <button class="btn" :disabled="!noteDirty" @click="saveNoteContent" style="margin-top:12px">
+            <span class="material-symbols-outlined">save</span>
+            {{ noteDirty ? '保存修改' : '无修改' }}
+          </button>
         </div>
 
-        <!-- RAG 标签配置 -->
+        <!-- RAG 标签配置（列表模式） -->
         <div v-else-if="selectedFolder" class="rag-panel">
           <header class="rag-header">
             <strong>RAG 标签配置</strong>
@@ -250,24 +324,30 @@
             </ul>
             <p v-else class="muted small empty-tags">该文件夹暂无标签</p>
 
-            <!-- 文件自动提取的标签 -->
+            <!-- 文件自动提取的标签（折叠 + 搜索） -->
             <div v-if="fileTags.length" class="file-tags-section">
               <header class="row between">
-                <strong class="small muted">文件中提取的标签（{{ fileTags.length }}）</strong>
+                <strong class="small muted" style="cursor:pointer" @click="fileTagsExpanded = !fileTagsExpanded">
+                  <span class="material-symbols-outlined" style="font-size:14px;vertical-align:middle">{{ fileTagsExpanded ? 'expand_less' : 'expand_more' }}</span>
+                  文件标签（{{ fileTagsSearched.length }}/{{ fileTags.length }}）
+                </strong>
                 <button class="btn btn-ghost compact" @click="importAllFileTags">
-                  <span class="material-symbols-outlined">playlist_add</span>全部导入
+                  <span class="material-symbols-outlined">playlist_add</span>导入
                 </button>
               </header>
-              <div class="file-tags-chips">
-                <span
-                  v-for="ft in fileTags"
-                  :key="ft.tag"
-                  class="file-tag-chip"
-                  :class="{ 'already-added': isTagAlreadyAdded(ft.tag) }"
-                  @click="importSingleTag(ft.tag)"
-                  :title="`出现 ${ft.count} 次 · 点击添加`"
-                >{{ ft.tag }}<sup v-if="ft.count > 1">{{ ft.count }}</sup></span>
-              </div>
+              <template v-if="fileTagsExpanded">
+                <input v-model="fileTagSearch" class="input compact" placeholder="搜索标签..." style="margin:6px 0" />
+                <div class="file-tags-chips file-tags-scroll">
+                  <span
+                    v-for="ft in fileTagsSearched"
+                    :key="ft.tag"
+                    class="file-tag-chip"
+                    :class="{ 'already-added': isTagAlreadyAdded(ft.tag) }"
+                    @click="importSingleTag(ft.tag)"
+                    :title="`出现 ${ft.count} 次 · 点击添加`"
+                  >{{ ft.tag }}<sup v-if="ft.count > 1">{{ ft.count }}</sup></span>
+                </div>
+              </template>
             </div>
           </div>
 
@@ -353,7 +433,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import PageHeader from '@/components/common/PageHeader.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import CodeEditor from '@/components/common/CodeEditor.vue'
@@ -486,11 +566,115 @@ function onCardClick(n: NoteItem, e: MouseEvent) {
   openNote(n)
 }
 
+// === 本地筛选 + 分页 ===
+const localFilter = ref('')
+const currentPage = ref(1)
+const pageSize = 20
+const localFilteredNotes = computed(() => {
+  const q = localFilter.value.trim()
+  if (!q) return filteredNotes.value
+  // 如果输入匹配一个已知标签，用 fileTagMap 精准按标签筛选
+  const tagFiles = new Set<string>()
+  const map = fileTagMap.value
+  for (const [file, tags] of Object.entries(map)) {
+    if (tags.some(t => t === q || t.toLowerCase().includes(q.toLowerCase()))) tagFiles.add(file)
+  }
+  if (tagFiles.size) return filteredNotes.value.filter(n => tagFiles.has(n.name))
+  // 否则按文件名/预览文本搜索
+  const lq = q.toLowerCase()
+  return filteredNotes.value.filter(n => n.name.toLowerCase().includes(lq) || (n.preview || '').toLowerCase().includes(lq))
+})
+const totalPages = computed(() => Math.max(1, Math.ceil(localFilteredNotes.value.length / pageSize)))
+const paginatedNotes = computed(() => {
+  const start = (currentPage.value - 1) * pageSize
+  return localFilteredNotes.value.slice(start, start + pageSize)
+})
+function goPage(p: number) { currentPage.value = Math.max(1, Math.min(p, totalPages.value)) }
+watch(localFilter, () => { currentPage.value = 1 })
+
+// === 富文本编辑器（延后初始化，见 noteContent 定义之后）===
+const richEditorEl = ref<HTMLDivElement | null>(null)
+
+// === 编辑页标签增删（修改 noteContent 里的 Tag: 行）===
+const showNoteTagInput = ref(false)
+const newNoteTag = ref('')
+
+function addTagToNote() {
+  showNoteTagInput.value = true
+  newNoteTag.value = ''
+  nextTick(() => {
+    const el = document.querySelector('input[placeholder*="输入标签名"]') as HTMLInputElement
+    el?.focus()
+  })
+}
+
+function confirmAddNoteTag() {
+  const tag = newNoteTag.value.trim()
+  if (!tag) { showNoteTagInput.value = false; return }
+  const currentTags = editingNoteTags.value
+  if (currentTags.includes(tag)) { showNoteTagInput.value = false; return }
+  updateNoteTagLine([...currentTags, tag])
+  newNoteTag.value = ''
+  showNoteTagInput.value = false
+}
+
+function removeTagFromNote(index: number) {
+  const currentTags = [...editingNoteTags.value]
+  currentTags.splice(index, 1)
+  updateNoteTagLine(currentTags)
+}
+
+function updateNoteTagLine(tags: string[]) {
+  const lines = noteContent.value.split('\n')
+  const tagLineIdx = lines.findIndex(l => /^Tags?:\s/.test(l))
+  const newLine = tags.length ? `Tag: ${tags.join('，')}` : ''
+  if (tagLineIdx >= 0) {
+    if (newLine) lines[tagLineIdx] = newLine
+    else lines.splice(tagLineIdx, 1)
+  } else if (newLine) {
+    lines.push(newLine)
+  }
+  noteContent.value = lines.join('\n')
+}
+
+// === 右侧标签搜索 + 折叠 ===
+const fileTagsExpanded = ref(false)
+const fileTagSearch = ref('')
+const fileTagsSearched = computed(() => {
+  const q = fileTagSearch.value.trim().toLowerCase()
+  if (!q) return fileTags.value
+  return fileTags.value.filter(ft => ft.tag.toLowerCase().includes(q))
+})
+
+// === 当前编辑笔记的标签（优先 fileTagMap，兜底内容解析）===
+const editingNoteTags = computed(() => {
+  // 先从 fileTagMap 查（精准，后端已解析）
+  if (editingFile.value) {
+    const mapped = fileTagMap.value[editingFile.value.name]
+    if (mapped?.length) return mapped
+  }
+  // 兜底：从内容解析
+  if (!noteContent.value) return [] as string[]
+  const tags: string[] = []
+  for (const line of noteContent.value.split('\n')) {
+    const m = line.match(/^Tags?:\s*(.+)/)
+    if (!m) continue
+    for (const t of m[1].split(/[,，]/)) {
+      const trimmed = t.trim()
+      if (trimmed && !/^标签\d+/.test(trimmed) && !trimmed.includes('「末」'))
+        tags.push(trimmed)
+    }
+  }
+  return [...new Set(tags)]
+})
+
 async function openFolder(name: string) {
   selectedFolder.value = name
   notes.value = []
   selectedNotes.value.clear()
   moveTarget.value = ''
+  currentPage.value = 1
+  localFilter.value = ''
   closeEditor()
   await loadRagForCurrentFolder()
   loadFileTags()
@@ -535,6 +719,52 @@ const editingFile = ref<{ folder: string; name: string } | null>(null)
 const noteContent = ref('')
 const noteOriginal = ref('')
 const noteDirty = computed(() => noteContent.value !== noteOriginal.value)
+
+// === 富文本编辑器（Tag 行原位渲染为 chip）===
+let richEditorUpdating = false
+
+function renderRichContent() {
+  if (!richEditorEl.value) return
+  const lines = noteContent.value.split('\n')
+  let html = ''
+  for (const line of lines) {
+    const tagMatch = line.match(/^(Tags?):\s*(.*)/)
+    if (tagMatch) {
+      const tags = tagMatch[2].split(/[,，]/).map(t => t.trim()).filter(Boolean)
+      html += `<div class="rich-tag-line" data-tagline="1"><span class="rich-tag-prefix">${tagMatch[1]}:</span> `
+      for (const tag of tags) {
+        html += `<span class="file-tag-chip rich-chip" contenteditable="false">${tag}</span> `
+      }
+      html += '</div>'
+    } else {
+      html += `<div>${line || '<br>'}</div>`
+    }
+  }
+  richEditorEl.value.innerHTML = html
+}
+
+function onRichEditorInput() {
+  if (richEditorUpdating) return
+  const el = richEditorEl.value
+  if (!el) return
+  const lines: string[] = []
+  for (const child of el.children) {
+    if ((child as HTMLElement).dataset?.tagline === '1') {
+      const prefix = child.querySelector('.rich-tag-prefix')?.textContent || 'Tag'
+      const chips = child.querySelectorAll('.rich-chip')
+      const tags = Array.from(chips).map(c => c.textContent?.trim()).filter(Boolean)
+      if (tags.length) lines.push(`${prefix} ${tags.join('，')}`)
+    } else {
+      lines.push((child as HTMLElement).innerText || '')
+    }
+  }
+  richEditorUpdating = true
+  noteContent.value = lines.join('\n')
+  richEditorUpdating = false
+}
+
+watch(noteContent, () => { if (!richEditorUpdating) renderRichContent() })
+watch(editingFile, (f) => { if (f) nextTick(renderRichContent) })
 
 async function openNote(n: NoteItem) {
   if (noteDirty.value) {
@@ -678,13 +908,15 @@ async function saveRagConfig() {
 
 // === 文件标签自动提取 ===
 const fileTags = ref<{ tag: string; count: number }[]>([])
+const fileTagMap = ref<Record<string, string[]>>({})
 
 async function loadFileTags() {
-  if (!selectedFolder.value) { fileTags.value = []; return }
+  if (!selectedFolder.value) { fileTags.value = []; fileTagMap.value = {}; return }
   try {
     const res = await extractFileTags(selectedFolder.value)
     fileTags.value = res?.tags || []
-  } catch { fileTags.value = [] }
+    fileTagMap.value = res?.fileTagMap || {}
+  } catch { fileTags.value = []; fileTagMap.value = {} }
 }
 
 function isTagAlreadyAdded(tag: string): boolean {
@@ -1007,6 +1239,32 @@ h4 { margin: 0; font-size: 13px; color: var(--secondary-text); }
   .muted { color: var(--secondary-text); font-size: 12px; }
   code { background: var(--bg-color); padding: 1px 4px; border-radius: var(--radius-sm); font-size: 11px; }
   .empty-tags { padding: 6px; }
+.inline-editor { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.rich-note-editor {
+  flex: 1; overflow-y: auto;
+  font-family: 'JetBrains Mono', 'Fira Code', Consolas, 'Courier New', monospace;
+  font-size: 13px; line-height: 1.6;
+  background: var(--tertiary-bg); color: var(--primary-text);
+  border: 1px solid var(--border-color); border-radius: var(--radius-sm);
+  padding: 12px; white-space: pre-wrap; word-break: break-word;
+  min-height: 200px; resize: vertical;
+  &:focus { outline: none; border-color: var(--highlight-text); box-shadow: 0 0 0 3px rgba(212, 116, 142, 0.1); }
+  div { min-height: 1.6em; }
+}
+.rich-tag-line { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.rich-tag-prefix { color: var(--text-tertiary); font-weight: 700; margin-right: 4px; }
+.rich-chip { cursor: default; }
+.note-detail-panel { padding: 12px; }
+.detail-meta { margin-bottom: 12px; }
+.detail-tags { margin-bottom: 8px; }
+.notes-pager {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 10px 12px; border-top: 1px solid var(--border); margin-top: auto;
+}
+.pager-info { font-size: 12px; color: var(--text-secondary); }
+.pager-jump { width: 48px; text-align: center; padding: 2px 4px; }
+.file-tags-section { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border); }
+.file-tags-scroll { max-height: 160px; overflow-y: auto; }
 }
 
 .slider { flex: 1; }
@@ -1021,17 +1279,30 @@ h4 { margin: 0; font-size: 13px; color: var(--secondary-text); }
   border-top: 1px dashed var(--border);
 }
 .file-tags-chips {
-  display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px;
+  display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; line-height: 1.8;
 }
 .file-tag-chip {
-  display: inline-flex; align-items: center; gap: 2px;
-  padding: 2px 8px; border-radius: 10px; font-size: 12px;
-  background: var(--bg-tertiary); color: var(--text-secondary);
-  border: 1px solid var(--border); cursor: pointer;
-  transition: all 0.15s;
-  sup { font-size: 9px; color: var(--text-tertiary); margin-left: 1px; }
-  &:hover { background: var(--accent-bg); color: var(--accent); border-color: var(--accent); }
-  &.already-added { opacity: 0.4; cursor: default; text-decoration: line-through; }
+  display: inline-block;
+  padding: 1px 12px;
+  border-radius: 14px;
+  font-size: 12px; font-weight: 600;
+  font-family: 'SF Mono', Consolas, monospace;
+  white-space: nowrap; cursor: pointer;
+  background: rgba(92, 178, 163, 0.18); color: #3d8d80;
+  border: 1px solid rgba(92, 178, 163, 0.4);
+  transition: all 0.12s;
+  sup { font-size: 9px; color: #6d3fc5; margin-left: 2px; font-weight: 700; }
+  &:hover {
+    transform: translateY(-1px) scale(1.04);
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.15);
+    background: rgba(92, 178, 163, 0.28);
+    z-index: 2;
+  }
+  &:active { transform: translateY(0); }
+  &.already-added {
+    opacity: 0.3; cursor: default; text-decoration: line-through;
+    &:hover { transform: none; box-shadow: none; background: rgba(92, 178, 163, 0.1); }
+  }
 }
 
 .rag-footer { display: flex; justify-content: flex-end; }

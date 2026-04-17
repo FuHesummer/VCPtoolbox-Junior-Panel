@@ -1058,6 +1058,10 @@ function insertAllTools() {
               <p v-if="currentChipPlaceholder.description" class="cc-desc">{{ currentChipPlaceholder.description }}</p>
               <p v-if="currentChipPlaceholder.preview" class="cc-preview">→ {{ currentChipPlaceholder.preview }}</p>
             </div>
+            <div v-else-if="editingChipName?.endsWith('日记本')" class="cc-diary-info">
+              <p class="cc-desc">📔 日记本直接注入（RAGDiaryPlugin）</p>
+              <p class="cc-preview">RAGDiaryPlugin 会将「{{ editingChipName.replace(/日记本$/, '') }}」目录的全部内容注入到此位置</p>
+            </div>
             <p v-else class="cc-unknown">❌ 此变量在已装插件和云仓库 registry 中都未找到（可能拼写错误或来自私人插件）</p>
           </div>
           <button class="cc-delete" @click="deleteEditingChip" type="button" title="删除此变量">

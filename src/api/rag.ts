@@ -63,7 +63,7 @@ export function getAvailableClusters() {
 
 // 自动提取文件夹内知识文件的 Tag: 行
 export function extractFileTags(folder: string) {
-  return apiFetch<{ tags: { tag: string; count: number }[]; folder: string }>(`/admin_api/extract-file-tags?folder=${encodeURIComponent(folder)}`, {
+  return apiFetch<{ tags: { tag: string; count: number }[]; folder: string; fileTagMap?: Record<string, string[]> }>(`/admin_api/extract-file-tags?folder=${encodeURIComponent(folder)}`, {
     showLoader: false,
     suppressErrorToast: true,
   })
