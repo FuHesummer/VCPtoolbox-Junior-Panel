@@ -39,6 +39,12 @@
           <strong>Panel</strong> {{ updateInfo.panel.current }} → {{ updateInfo.panel.latest }}
         </template>
       </div>
+      <button v-if="!updateRunning" class="update-btn" @click="executeUpdate">
+        <span class="material-symbols-outlined">system_update_alt</span> Update
+      </button>
+      <span v-if="updateRunning" class="update-running">
+        <span class="material-symbols-outlined spin">sync</span> {{ updateStatus }}
+      </span>
       <a v-if="updateInfo.backend.releaseUrl" :href="updateInfo.backend.releaseUrl" target="_blank" class="update-link">
         <span class="material-symbols-outlined">open_in_new</span> Release
       </a>
@@ -227,6 +233,41 @@ const newapi = ref<NewApiSummary | null>(null)
 const pluginCards = ref<PluginCardRendered[]>([])
 const updating = ref(false)
 const updateInfo = ref<UpdateCheckResult | null>(null)
+const updateRunning = ref(false)
+const updateStatus = ref('')
+
+async function executeUpdate() {
+  updateRunning.value = true
+  updateStatus.value = 'Connecting...'
+  try {
+    const res = await fetch('/admin_api/execute-update', { method: 'POST' })
+    const reader = res.body?.getReader()
+    if (!reader) { updateStatus.value = 'No stream'; return }
+    const decoder = new TextDecoder()
+    let buf = ''
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buf += decoder.decode(value, { stream: true })
+      const lines = buf.split('\n')
+      buf = lines.pop() || ''
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const ev = JSON.parse(line.slice(6))
+            updateStatus.value = ev.message || ev.step
+            if (ev.step === 'done' || ev.step === 'error') {
+              updateRunning.value = false
+            }
+          } catch {}
+        }
+      }
+    }
+  } catch (err: any) {
+    updateStatus.value = err.message
+    updateRunning.value = false
+  }
+}
 
 // ============ 布局状态 ============
 const layouts = ref<CardLayout[]>([])
@@ -618,6 +659,33 @@ onBeforeUnmount(() => {
     &:hover { background: #e65100; }
     .material-symbols-outlined { font-size: 14px; }
   }
+
+  .update-btn {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 5px 12px;
+    background: #2e7d32;
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    font-size: 12px;
+    cursor: pointer;
+    font-weight: 500;
+    &:hover { background: #1b5e20; }
+    .material-symbols-outlined { font-size: 15px; }
+  }
+
+  .update-running {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    color: #e65100;
+    .spin { animation: spin 1s linear infinite; font-size: 16px; }
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
 
   .update-dismiss {
     background: none;
