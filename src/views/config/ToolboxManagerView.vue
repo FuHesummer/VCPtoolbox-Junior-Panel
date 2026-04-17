@@ -140,7 +140,7 @@
                 </button>
               </header>
 
-              <div class="pane-body fold-stream">
+              <div class="pane-body fold-stream" v-if="foldBlocks.length > 0">
                 <p class="hint multi">
                   <strong>两种 Fold 语法</strong>，按 description 是否为空区分：
                 </p>
