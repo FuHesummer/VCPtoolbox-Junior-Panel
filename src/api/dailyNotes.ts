@@ -96,6 +96,13 @@ export function deleteNotesBatch(notesToDelete: Array<{ folder: string; file: st
   )
 }
 
+export function renameNote(folder: string, oldName: string, newName: string) {
+  return apiFetch<{ message?: string; oldName: string; newName: string }>(
+    '/admin_api/dailynotes/rename',
+    { method: 'POST', body: { folder, oldName, newName } },
+  )
+}
+
 export function deleteEmptyFolder(folderName: string) {
   return apiFetch<{ message?: string }>(
     '/admin_api/dailynotes/folder/delete',

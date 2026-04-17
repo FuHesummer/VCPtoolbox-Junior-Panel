@@ -241,43 +241,57 @@
       <section class="right card">
         <!-- 笔记详情（编辑时） -->
         <div v-if="editingFile" class="note-detail-panel">
-          <button class="btn btn-ghost compact" @click="closeEditor" style="margin-bottom:8px">
+          <button class="btn btn-ghost compact" @click="closeEditor">
             <span class="material-symbols-outlined">arrow_back</span>返回列表
           </button>
+
+          <!-- 标题改名 -->
+          <div class="detail-title">
+            <input
+              v-model="editingTitle"
+              class="title-input"
+              @keydown.enter="($event.target as HTMLInputElement).blur()"
+              @blur="handleRename"
+            />
+          </div>
+
           <div class="detail-meta">
             <p class="muted small">{{ editingFile.folder }} · {{ noteContent.length }} 字</p>
           </div>
 
           <div class="detail-tags">
             <header class="row between">
-              <strong class="small">文件标签</strong>
-              <button class="btn btn-ghost compact" @click="addTagToNote">
+              <strong class="small"><span class="material-symbols-outlined" style="font-size:14px;vertical-align:-2px">label</span> 文件标签</strong>
+              <button class="btn btn-ghost compact" @click="addTagToNote" title="添加标签">
                 <span class="material-symbols-outlined">add</span>
               </button>
             </header>
-            <div class="file-tags-chips" style="margin-top:6px">
+            <div v-if="editingNoteTags.length" class="file-tags-chips" style="margin-top:8px">
               <span
                 v-for="(tag, i) in editingNoteTags"
                 :key="tag"
-                class="file-tag-chip editable-tag"
-              >{{ tag }}<button class="tag-remove" @click="removeTagFromNote(i)">×</button></span>
+                class="editable-tag"
+              >{{ tag }}<button class="tag-remove" @click="removeTagFromNote(i)"><span class="material-symbols-outlined">close</span></button></span>
             </div>
+            <p v-else class="muted small" style="margin:8px 0 0;opacity:0.6">暂无标签</p>
             <input
               v-if="showNoteTagInput"
               v-model="newNoteTag"
               class="input compact"
               placeholder="输入标签名，回车添加"
-              style="margin-top:6px"
+              style="margin-top:8px"
               @keydown.enter="confirmAddNoteTag"
               @blur="showNoteTagInput = false"
               ref="noteTagInputEl"
             />
           </div>
 
-          <button class="btn" :disabled="!noteDirty" @click="saveNoteContent" style="margin-top:12px">
-            <span class="material-symbols-outlined">save</span>
-            {{ noteDirty ? '保存修改' : '无修改' }}
-          </button>
+          <div class="detail-save">
+            <button class="btn save-btn" :class="{ dirty: noteDirty }" :disabled="!noteDirty" @click="saveNoteContent">
+              <span class="material-symbols-outlined">{{ noteDirty ? 'save' : 'check_circle' }}</span>
+              {{ noteDirty ? '保存修改' : '已保存' }}
+            </button>
+          </div>
         </div>
 
         <!-- RAG 标签配置（列表模式） -->
@@ -436,11 +450,10 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import PageHeader from '@/components/common/PageHeader.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
-import CodeEditor from '@/components/common/CodeEditor.vue'
 import BaseModal from '@/components/common/BaseModal.vue'
 import AgentAvatar from '@/components/common/AgentAvatar.vue'
 import {
-  listNotesFolders, listNotesInFolder, getNoteContent, saveNote,
+  listNotesFolders, listNotesInFolder, getNoteContent, saveNote, renameNote,
   deleteNotesBatch, moveNotes, deleteEmptyFolder, searchNotes, associativeDiscovery,
   type NotesMode, type NoteItem, type AgentEntry, type ThinkingFolder, type DiscoveryResult,
 } from '@/api/dailyNotes'
@@ -716,9 +729,29 @@ function exitSearch() {
 
 // === 编辑器 ===
 const editingFile = ref<{ folder: string; name: string } | null>(null)
+const editingTitle = ref('')
 const noteContent = ref('')
 const noteOriginal = ref('')
 const noteDirty = computed(() => noteContent.value !== noteOriginal.value)
+
+async function handleRename() {
+  if (!editingFile.value) return
+  const newName = editingTitle.value.trim()
+  if (!newName || newName === editingFile.value.name) return
+  try {
+    await renameNote(editingFile.value.folder, editingFile.value.name, newName)
+    editingFile.value = { ...editingFile.value, name: newName }
+    ui.showMessage('已重命名', 'success')
+    // refresh list
+    if (editingFile.value.folder === selectedFolder.value) {
+      const data = await listNotesInFolder(editingFile.value.folder)
+      notes.value = data.notes || []
+    }
+  } catch (e) {
+    ui.showMessage('重命名失败：' + (e as Error).message, 'error')
+    editingTitle.value = editingFile.value.name // revert
+  }
+}
 
 // === 富文本编辑器（Tag 行原位渲染为 chip）===
 let richEditorUpdating = false
@@ -776,6 +809,7 @@ async function openNote(n: NoteItem) {
   try {
     const { content } = await getNoteContent(folder, n.name)
     editingFile.value = { folder, name: n.name }
+    editingTitle.value = n.name
     noteContent.value = content
     noteOriginal.value = content
   } catch (e) {
@@ -1239,32 +1273,176 @@ h4 { margin: 0; font-size: 13px; color: var(--secondary-text); }
   .muted { color: var(--secondary-text); font-size: 12px; }
   code { background: var(--bg-color); padding: 1px 4px; border-radius: var(--radius-sm); font-size: 11px; }
   .empty-tags { padding: 6px; }
+}
+
+// ===== 编辑器（中间面板） =====
 .inline-editor { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .rich-note-editor {
   flex: 1; overflow-y: auto;
   font-family: 'JetBrains Mono', 'Fira Code', Consolas, 'Courier New', monospace;
   font-size: 13px; line-height: 1.6;
   background: var(--tertiary-bg); color: var(--primary-text);
-  border: 1px solid var(--border-color); border-radius: var(--radius-sm);
-  padding: 12px; white-space: pre-wrap; word-break: break-word;
+  border: 1px solid var(--border-color); border-radius: var(--radius-md);
+  padding: 12px 14px; white-space: pre-wrap; word-break: break-word;
   min-height: 200px; resize: vertical;
-  &:focus { outline: none; border-color: var(--highlight-text); box-shadow: 0 0 0 3px rgba(212, 116, 142, 0.1); }
-  div { min-height: 1.6em; }
+  transition: border-color 0.15s, box-shadow 0.15s;
+  &:focus {
+    outline: none;
+    border-color: var(--button-bg, #d4748e);
+    box-shadow: 0 0 0 3px rgba(212, 116, 142, 0.12);
+  }
+  :deep(div) { min-height: 1.6em; }
+
+  // `:deep()` — scoped CSS 不作用于 innerHTML 动态元素，必须用 :deep 穿透
+  :deep(.rich-tag-line) {
+    display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+    padding: 6px 0;
+    border-bottom: 1px dashed rgba(212, 116, 142, 0.2);
+    margin-bottom: 2px;
+    min-height: 1.6em;
+  }
+  :deep(.rich-tag-prefix) {
+    color: var(--secondary-text);
+    font-weight: 700;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    margin-right: 4px;
+    user-select: none;
+    opacity: 0.7;
+  }
+  // 编辑器内 tag chip — 匹配 PromptEditor var-chip 风格
+  :deep(.rich-chip) {
+    display: inline-block;
+    padding: 1px 12px;
+    margin: 0 2px;
+    font-size: 12px;
+    font-weight: 600;
+    border-radius: 14px;
+    font-family: 'SF Mono', Consolas, monospace;
+    white-space: nowrap;
+    user-select: none;
+    cursor: default;
+    vertical-align: 1px;
+    background: rgba(92, 178, 163, 0.18);
+    color: #3d8d80;
+    border: 1px solid rgba(92, 178, 163, 0.4);
+    transition: all 0.12s;
+    &:hover {
+      transform: translateY(-1px) scale(1.04);
+      box-shadow: 0 3px 10px rgba(0, 0, 0, 0.15);
+      background: rgba(92, 178, 163, 0.28);
+      z-index: 2;
+    }
+  }
 }
-.rich-tag-line { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
-.rich-tag-prefix { color: var(--text-tertiary); font-weight: 700; margin-right: 4px; }
-.rich-chip { cursor: default; }
-.note-detail-panel { padding: 12px; }
-.detail-meta { margin-bottom: 12px; }
-.detail-tags { margin-bottom: 8px; }
+
+// ===== 右侧笔记详情面板 =====
+.note-detail-panel {
+  padding: 16px;
+  display: flex; flex-direction: column; gap: 14px;
+  height: 100%;
+}
+
+.detail-title {
+  display: flex; align-items: center; gap: 6px;
+  .title-input {
+    flex: 1; font-size: 14px; font-weight: 600;
+    padding: 8px 12px;
+    background: var(--tertiary-bg);
+    border: 1.5px solid var(--border-color);
+    border-radius: var(--radius-md);
+    color: var(--primary-text);
+    transition: border-color 0.15s, box-shadow 0.15s;
+    &:focus {
+      outline: none;
+      border-color: var(--button-bg);
+      box-shadow: 0 0 0 3px rgba(212, 116, 142, 0.08);
+    }
+  }
+}
+
+.detail-meta {
+  padding: 8px 12px;
+  background: var(--accent-bg);
+  border-radius: var(--radius-sm);
+  .small { font-size: 12px; margin: 0; }
+}
+
+.detail-tags {
+  padding: 10px 12px;
+  background: var(--accent-bg);
+  border-radius: var(--radius-md);
+  .row { display: flex; align-items: center; gap: 8px; }
+  .row.between { justify-content: space-between; }
+  .small { font-size: 12px; }
+}
+
+// 右侧面板的可编辑 tag chip
+.editable-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px 2px 12px;
+  border-radius: 14px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: 'SF Mono', Consolas, monospace;
+  white-space: nowrap;
+  background: rgba(92, 178, 163, 0.18);
+  color: #3d8d80;
+  border: 1px solid rgba(92, 178, 163, 0.4);
+  transition: all 0.12s;
+  &:hover {
+    background: rgba(92, 178, 163, 0.28);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+  }
+}
+.tag-remove {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px;
+  padding: 0; margin: 0;
+  border: none; background: rgba(0, 0, 0, 0.08);
+  border-radius: 50%;
+  cursor: pointer;
+  color: #3d8d80;
+  font-size: 0; // hide raw text fallback
+  transition: all 0.12s;
+  .material-symbols-outlined { font-size: 12px; line-height: 1; }
+  &:hover { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
+}
+
+.detail-save {
+  margin-top: auto;
+  padding-top: 8px;
+}
+.save-btn {
+  width: 100%;
+  justify-content: center;
+  transition: all 0.15s;
+  &.dirty {
+    background: var(--button-bg);
+    color: #fff;
+    &:hover { filter: brightness(1.1); }
+  }
+}
+
+// ===== 分页 =====
 .notes-pager {
   display: flex; align-items: center; justify-content: center; gap: 6px;
-  padding: 10px 12px; border-top: 1px solid var(--border); margin-top: auto;
+  padding: 10px 12px;
+  border-top: 1px solid var(--border-color);
+  margin-top: auto;
 }
-.pager-info { font-size: 12px; color: var(--text-secondary); }
-.pager-jump { width: 48px; text-align: center; padding: 2px 4px; }
-.file-tags-section { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border); }
-.file-tags-scroll { max-height: 160px; overflow-y: auto; }
+.pager-info { font-size: 12px; color: var(--secondary-text); }
+.pager-jump {
+  width: 48px; text-align: center; padding: 4px 6px;
+  font-size: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--tertiary-bg);
+  color: var(--primary-text);
+  &:focus { outline: none; border-color: var(--button-bg); }
 }
 
 .slider { flex: 1; }
