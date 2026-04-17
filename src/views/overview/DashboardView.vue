@@ -27,6 +27,26 @@
       </template>
     </PageHeader>
 
+    <!-- Update notification banner -->
+    <div v-if="updateInfo && (updateInfo.backend.updateAvailable || updateInfo.panel.updateAvailable)" class="update-banner">
+      <span class="material-symbols-outlined">system_update</span>
+      <div class="update-text">
+        <template v-if="updateInfo.backend.updateAvailable">
+          <strong>Backend</strong> {{ updateInfo.backend.current }} → {{ updateInfo.backend.latest }}
+        </template>
+        <template v-if="updateInfo.backend.updateAvailable && updateInfo.panel.updateAvailable"> · </template>
+        <template v-if="updateInfo.panel.updateAvailable">
+          <strong>Panel</strong> {{ updateInfo.panel.current }} → {{ updateInfo.panel.latest }}
+        </template>
+      </div>
+      <a v-if="updateInfo.backend.releaseUrl" :href="updateInfo.backend.releaseUrl" target="_blank" class="update-link">
+        <span class="material-symbols-outlined">open_in_new</span> Release
+      </a>
+      <button class="update-dismiss" @click="updateInfo = null">
+        <span class="material-symbols-outlined">close</span>
+      </button>
+    </div>
+
     <!-- 隐藏卡片抽屉 -->
     <div v-if="hiddenCards.length > 0" class="hidden-shelf">
       <span class="hs-label">
@@ -174,6 +194,7 @@ import { getSystemResources, getPM2Processes } from '@/api/system'
 import { getNewApiSummary, type NewApiSummary } from '@/api/newapi'
 import { listPlugins, getPluginUiPrefs } from '@/api/plugins'
 import { getDashboardLayout, saveDashboardLayout, type CardLayout, type CardSize } from '@/api/dashboardLayout'
+import { checkUpdates, type UpdateCheckResult } from '@/api/updateChecker'
 import type { PluginInfo, DashboardCardDef } from '@/api/types'
 
 interface PluginCardRendered extends DashboardCardDef {
@@ -205,6 +226,7 @@ const pm2 = ref<Array<{ name: string; pid: number | null; status: string; cpu?: 
 const newapi = ref<NewApiSummary | null>(null)
 const pluginCards = ref<PluginCardRendered[]>([])
 const updating = ref(false)
+const updateInfo = ref<UpdateCheckResult | null>(null)
 
 // ============ 布局状态 ============
 const layouts = ref<CardLayout[]>([])
@@ -554,6 +576,8 @@ onMounted(async () => {
   await loadPluginCards()
   await loadLayouts()
   timer = window.setInterval(refresh, 5000)
+  // Silent update check (non-blocking)
+  checkUpdates().then(r => { updateInfo.value = r }).catch(() => {})
 })
 
 onBeforeUnmount(() => {
@@ -563,6 +587,50 @@ onBeforeUnmount(() => {
 </script>
 
 <style lang="scss" scoped>
+/* ============ Update notification banner ============ */
+.update-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  margin-bottom: 16px;
+  background: linear-gradient(135deg, #fff3e0 0%, #ffe0b2 100%);
+  border: 1px solid #ffcc02;
+  border-radius: 10px;
+  color: #e65100;
+  font-size: 13px;
+
+  > .material-symbols-outlined:first-child { font-size: 20px; color: #f57c00; }
+
+  .update-text { flex: 1; }
+  .update-text strong { font-weight: 600; }
+
+  .update-link {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
+    background: #f57c00;
+    color: #fff;
+    border-radius: 6px;
+    font-size: 12px;
+    text-decoration: none;
+    &:hover { background: #e65100; }
+    .material-symbols-outlined { font-size: 14px; }
+  }
+
+  .update-dismiss {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: #bf360c;
+    padding: 2px;
+    border-radius: 50%;
+    &:hover { background: rgba(0,0,0,0.08); }
+    .material-symbols-outlined { font-size: 18px; }
+  }
+}
+
 /* ============ 隐藏卡片抽屉 ============ */
 .hidden-shelf {
   display: flex;
