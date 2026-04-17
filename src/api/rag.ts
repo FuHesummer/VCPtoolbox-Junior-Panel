@@ -61,6 +61,14 @@ export function getAvailableClusters() {
   return apiFetch<{ clusters: string[] }>('/admin_api/available-clusters')
 }
 
+// 自动提取文件夹内知识文件的 Tag: 行
+export function extractFileTags(folder: string) {
+  return apiFetch<{ tags: { tag: string; count: number }[]; folder: string }>(`/admin_api/extract-file-tags?folder=${encodeURIComponent(folder)}`, {
+    showLoader: false,
+    suppressErrorToast: true,
+  })
+}
+
 // 向量库状态 — vectorDBManager 未初始化时返回 503 Unavailable，默认 silent
 export function getVectorDbStatus(opts: { showLoader?: boolean; suppressErrorToast?: boolean } = {}) {
   return apiFetch<{ success: boolean; status: string }>('/admin_api/vectordb-status', {

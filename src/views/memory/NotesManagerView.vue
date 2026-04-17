@@ -249,6 +249,26 @@
               </li>
             </ul>
             <p v-else class="muted small empty-tags">该文件夹暂无标签</p>
+
+            <!-- 文件自动提取的标签 -->
+            <div v-if="fileTags.length" class="file-tags-section">
+              <header class="row between">
+                <strong class="small muted">文件中提取的标签（{{ fileTags.length }}）</strong>
+                <button class="btn btn-ghost compact" @click="importAllFileTags">
+                  <span class="material-symbols-outlined">playlist_add</span>全部导入
+                </button>
+              </header>
+              <div class="file-tags-chips">
+                <span
+                  v-for="ft in fileTags"
+                  :key="ft.tag"
+                  class="file-tag-chip"
+                  :class="{ 'already-added': isTagAlreadyAdded(ft.tag) }"
+                  @click="importSingleTag(ft.tag)"
+                  :title="`出现 ${ft.count} 次 · 点击添加`"
+                >{{ ft.tag }}<sup v-if="ft.count > 1">{{ ft.count }}</sup></span>
+              </div>
+            </div>
           </div>
 
           <footer class="rag-footer">
@@ -344,7 +364,7 @@ import {
   deleteNotesBatch, moveNotes, deleteEmptyFolder, searchNotes, associativeDiscovery,
   type NotesMode, type NoteItem, type AgentEntry, type ThinkingFolder, type DiscoveryResult,
 } from '@/api/dailyNotes'
-import { getRagTags, saveRagTags, type RagTagsConfig } from '@/api/rag'
+import { getRagTags, saveRagTags, extractFileTags, type RagTagsConfig } from '@/api/rag'
 import { useUiStore } from '@/stores/ui'
 import { useConfirm } from '@/composables/useConfirm'
 
@@ -473,6 +493,7 @@ async function openFolder(name: string) {
   moveTarget.value = ''
   closeEditor()
   await loadRagForCurrentFolder()
+  loadFileTags()
   loadingNotes.value = true
   try {
     const data = await listNotesInFolder(name)
@@ -653,6 +674,32 @@ async function saveRagConfig() {
   } catch (e) {
     ui.showMessage('保存失败：' + (e as Error).message, 'error')
   } finally { ragSaving.value = false }
+}
+
+// === 文件标签自动提取 ===
+const fileTags = ref<{ tag: string; count: number }[]>([])
+
+async function loadFileTags() {
+  if (!selectedFolder.value) { fileTags.value = []; return }
+  try {
+    const res = await extractFileTags(selectedFolder.value)
+    fileTags.value = res?.tags || []
+  } catch { fileTags.value = [] }
+}
+
+function isTagAlreadyAdded(tag: string): boolean {
+  return ragTags.value.some(t => t.value === tag || t.value.startsWith(tag + ':'))
+}
+
+function importSingleTag(tag: string) {
+  if (isTagAlreadyAdded(tag)) return
+  ragTags.value.push({ value: tag })
+}
+
+function importAllFileTags() {
+  for (const ft of fileTags.value) {
+    if (!isTagAlreadyAdded(ft.tag)) ragTags.value.push({ value: ft.tag })
+  }
 }
 
 // === 联想追溯 ===
@@ -967,6 +1014,25 @@ h4 { margin: 0; font-size: 13px; color: var(--secondary-text); }
 
 .tag-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; }
 .tag-item { display: flex; gap: 4px; align-items: center; .flex { flex: 1; } }
+
+.file-tags-section {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+}
+.file-tags-chips {
+  display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px;
+}
+.file-tag-chip {
+  display: inline-flex; align-items: center; gap: 2px;
+  padding: 2px 8px; border-radius: 10px; font-size: 12px;
+  background: var(--bg-tertiary); color: var(--text-secondary);
+  border: 1px solid var(--border); cursor: pointer;
+  transition: all 0.15s;
+  sup { font-size: 9px; color: var(--text-tertiary); margin-left: 1px; }
+  &:hover { background: var(--accent-bg); color: var(--accent); border-color: var(--accent); }
+  &.already-added { opacity: 0.4; cursor: default; text-decoration: line-through; }
+}
 
 .rag-footer { display: flex; justify-content: flex-end; }
 

@@ -30,7 +30,7 @@ const editorEl = ref<HTMLDivElement | null>(null)
 let internalUpdate = false
 
 // ============ 占位符分类 ============
-type VarKind = 'Tar' | 'Var' | 'Sar' | 'Agent' | 'Sys' | 'Timeline' | 'Rag' | 'RagSim' | 'RagHybrid' | 'Tool' | 'Toolbox' | 'Emoji'
+type VarKind = 'Tar' | 'Var' | 'Sar' | 'Agent' | 'Sys' | 'Timeline' | 'Rag' | 'RagSim' | 'RagHybrid' | 'Tool' | 'Toolbox' | 'Emoji' | 'Diary'
 type ChipFormat = 'var' | 'rag' | 'rag_sim' | 'rag_hybrid'
 
 // Toolbox alias 集合（运行期从后端拉，classify 用于识别 {{alias}} / {{toolbox:alias}}）
@@ -62,6 +62,8 @@ function classify(name: string, format: ChipFormat = 'var'): VarKind {
   if (name.startsWith('VCP')) return 'Tool'
   // 表情包命名惯例：{{XXX表情包}} → EmojiListGenerator 生成，黄色 chip
   if (name.endsWith('表情包')) return 'Emoji'
+  // {{xxx日记本}} → RAGDiaryPlugin 直接注入模式，等效 RAG 占位符
+  if (name.endsWith('日记本')) return 'Diary'
   return 'Sys'
 }
 
@@ -71,6 +73,7 @@ const KIND_LABEL: Record<VarKind, string> = {
   Rag: 'RAG 无条件', RagSim: '相似度检索', RagHybrid: '混合阈值', Tool: 'VCP 工具',
   Toolbox: 'Toolbox 工具集',
   Emoji: '表情包',
+  Diary: '日记本直注',
 }
 
 function escapeHtml(s: string) {
@@ -95,6 +98,8 @@ export type PlaceholderHealth = 'ok' | 'missing-plugin' | 'unknown'
 function getHealth(name: string, format: ChipFormat = 'var'): PlaceholderHealth {
   // RAG 三种格式不做健康度判定（日记本/元思考的有效性走另一条 RAG 管线）
   if (format !== 'var') return 'ok'
+  // {{xxx日记本}} 是 RAGDiaryPlugin 直注模式，有效性由 RAG 管线保证
+  if (name.endsWith('日记本')) return 'ok'
   // 已装插件提供的占位符 → ✅
   if (placeholderMap.value.has(name)) return 'ok'
   // Toolbox 工具集 → ✅
@@ -121,6 +126,11 @@ function getHealth(name: string, format: ChipFormat = 'var'): PlaceholderHealth 
 }
 
 function getVarTooltip(name: string): string {
+  // {{xxx日记本}} 直注模式 — RAGDiaryPlugin 处理
+  if (name.endsWith('日记本')) {
+    const diaryName = name.replace(/日记本$/, '')
+    return `${name}（日记本直接注入）\nRAGDiaryPlugin 会将「${diaryName}」目录的全部内容注入到此位置\n\n点击替换 / 拖拽移动 / Delete 删除`
+  }
   // Toolbox 优先识别（支持 {{alias}} 和 {{toolbox:alias}} 两种格式）
   const toolboxName = name.startsWith('toolbox:') ? name.slice(8) : name
   if (toolboxAliases.value.has(toolboxName)) {
@@ -1412,6 +1422,7 @@ function insertAllTools() {
   &.kind-Tool { background: rgba(14, 165, 233, 0.15); color: #0284c7; border: 1px solid rgba(14, 165, 233, 0.35); }
   &.kind-Toolbox { background: linear-gradient(135deg, rgba(20, 184, 166, 0.18), rgba(34, 197, 94, 0.12)); color: #0d9488; border: 1px solid rgba(20, 184, 166, 0.4); }
   &.kind-Emoji { background: linear-gradient(135deg, rgba(250, 204, 21, 0.2), rgba(245, 158, 11, 0.15)); color: #b45309; border: 1px solid rgba(245, 158, 11, 0.45); }
+  &.kind-Diary { background: linear-gradient(135deg, rgba(168, 85, 247, 0.18), rgba(139, 92, 246, 0.12)); color: #7c3aed; border: 1px solid rgba(168, 85, 247, 0.4); }
   &.kind-Agent { background: rgba(212, 116, 142, 0.18); color: #b25a76; border: 1px solid rgba(212, 116, 142, 0.4); }
   &.kind-Sys { background: rgba(136, 136, 136, 0.18); color: #555; border: 1px solid rgba(136, 136, 136, 0.4); }
 
@@ -1472,6 +1483,7 @@ function insertAllTools() {
   &.kind-Tool { border-color: rgba(14, 165, 233, 0.5); background: linear-gradient(135deg, rgba(14, 165, 233, 0.08), rgba(14, 165, 233, 0.02)); }
   &.kind-Toolbox { border-color: rgba(20, 184, 166, 0.5); background: linear-gradient(135deg, rgba(20, 184, 166, 0.08), rgba(34, 197, 94, 0.02)); }
   &.kind-Emoji { border-color: rgba(245, 158, 11, 0.5); background: linear-gradient(135deg, rgba(250, 204, 21, 0.08), rgba(245, 158, 11, 0.02)); }
+  &.kind-Diary { border-color: rgba(168, 85, 247, 0.5); background: linear-gradient(135deg, rgba(168, 85, 247, 0.08), rgba(139, 92, 246, 0.02)); }
   &.kind-Agent { border-color: rgba(212, 116, 142, 0.5); background: linear-gradient(135deg, rgba(212, 116, 142, 0.08), rgba(212, 116, 142, 0.02)); }
   &.kind-Sys { border-color: rgba(136, 136, 136, 0.5); }
   .cc-icon {
@@ -1526,6 +1538,7 @@ function insertAllTools() {
   &.kind-Tool .cc-kind-tag { background: #0ea5e9; }
   &.kind-Toolbox .cc-kind-tag { background: linear-gradient(135deg, #14b8a6, #22c55e); }
   &.kind-Emoji .cc-kind-tag { background: linear-gradient(135deg, #facc15, #f59e0b); }
+  &.kind-Diary .cc-kind-tag { background: linear-gradient(135deg, #a855f7, #8b5cf6); }
   &.kind-Agent .cc-kind-tag { background: #d4748e; }
   &.kind-Sys .cc-kind-tag { background: #888; }
 
