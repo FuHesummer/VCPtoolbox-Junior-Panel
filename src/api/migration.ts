@@ -3,13 +3,27 @@ import { apiFetch } from './client'
 
 // ============ 类型定义 ============
 
-export interface ScanAgent { name: string; promptFile: string; size: number }
+export interface ScanAgent {
+  name: string
+  promptFile: string
+  size: number
+  structure?: 'flat' | 'nested'
+  diary?: { relPath: string; fileCount: number; size: number } | null
+  knowledge?: Array<{ name: string; relPath: string; fileCount: number; size: number }>
+}
 export interface ScanDailynote {
   name: string
   relPath: string
   fileCount: number
   size: number
   suggest: 'personal' | 'public'
+}
+export interface ScanKnowledge {
+  name: string
+  relPath: string
+  fileCount: number
+  size: number
+  suggest: 'public' | 'auto'
 }
 export interface ScanPlugin {
   name: string
@@ -39,6 +53,7 @@ export interface ScanResult {
   scanAt?: string
   agents: ScanAgent[]
   dailynotes: ScanDailynote[]
+  knowledge: ScanKnowledge[]
   plugins: ScanPlugin[]
   tvs: ScanTvs[]
   images: ScanImage[]
@@ -66,20 +81,30 @@ export interface ConfigDiff {
   summary: { add: number; conflict: number; same: number; juniorOnly: number }
 }
 
+export interface InstallableItem {
+  name: string
+  source: 'localRepo' | 'remoteStore'
+  upstreamSize: number
+  hasUpstreamConfig: boolean
+  upstreamEnabled: boolean
+  // localRepo 独有
+  repoSize?: number
+  repoDefaultEnabled?: boolean
+  repoBlocked?: boolean
+  // remoteStore 独有
+  remoteVersion?: string
+  remoteDisplayName?: string
+  remoteDescription?: string
+}
+
 export interface PluginMatch {
-  installable: Array<{
-    name: string
-    upstreamSize: number
-    repoSize: number
-    hasUpstreamConfig: boolean
-    repoDefaultEnabled: boolean
-    repoBlocked: boolean
-    upstreamEnabled: boolean
-  }>
+  installable: InstallableItem[]
   builtin: Array<{ name: string; reason: string }>
-  notInRepo: Array<{ name: string; reason: string }>
-  repoRoot: string
-  repoExists: boolean
+  notAvailable: Array<{ name: string; reason: string }>
+  sources: {
+    localRepoPath: string | null
+    remoteStoreSize: number
+  }
 }
 
 export interface DailynoteDecision {
@@ -88,8 +113,15 @@ export interface DailynoteDecision {
   agentName?: string
   publicDirName?: string
 }
+export interface KnowledgeDecision {
+  sourceName: string
+  targetType: 'personal' | 'public' | 'skip'
+  agentName?: string
+  publicDirName?: string
+}
 export interface PluginInstallDecision {
   name: string
+  source?: 'localRepo' | 'remoteStore' | 'auto'
   mergeConfig?: boolean
   copyVectorStore?: boolean
   enable?: boolean
@@ -104,11 +136,28 @@ export interface MigrationPlan {
   doBackup?: boolean
   agents?: string[]
   dailynotes?: DailynoteDecision[]
+  knowledge?: KnowledgeDecision[]
   tvs?: string[]
   images?: string[]
   plugins?: PluginInstallDecision[]
   configMerge?: ConfigMergeDecisions
   copyVectors?: boolean
+}
+
+export interface AutoPlanResult {
+  plan: MigrationPlan
+  scan: ScanResult
+  match: PluginMatch
+  summary: {
+    agents: number
+    dailynotes: number
+    knowledge: number
+    tvs: number
+    images: number
+    pluginsInstallable: number
+    pluginsBuiltin: number
+    pluginsSkipped: number
+  }
 }
 
 export interface MigrationJobStatus {
@@ -162,6 +211,14 @@ export async function matchPlugins(plugins: ScanPlugin[]): Promise<PluginMatch> 
   return apiFetch('/admin_api/migration/match-plugins', {
     method: 'POST',
     body: { plugins },
+  })
+}
+
+// 🪄 智能推荐：一键生成完整默认 plan
+export async function autoPlan(sourcePath: string): Promise<AutoPlanResult> {
+  return apiFetch('/admin_api/migration/auto-plan', {
+    method: 'POST',
+    body: { sourcePath },
   })
 }
 

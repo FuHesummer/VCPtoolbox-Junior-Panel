@@ -2,13 +2,14 @@
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import {
   scanSource, diffConfig, matchPlugins, executeMigration,
+  autoPlan,
   listBackups, getStatus, cancel, createBackup,
   formatBytes, sourceTypeLabel,
   uploadSource, listUploads, deleteUpload,
   getWebdavConfig, testWebdav, listWebdavBackups, downloadFromWebdav,
   type ScanResult, type ConfigDiff, type PluginMatch,
   type MigrationPlan, type SseLogEvent, type BackupItem,
-  type DailynoteDecision, type PluginInstallDecision,
+  type DailynoteDecision, type KnowledgeDecision, type PluginInstallDecision,
   type UploadedItem, type WebdavConfig, type WebdavItem,
 } from '@/api/migration'
 
@@ -39,11 +40,15 @@ const webdavDownloading = ref(false)
 // Step 2 — 选择状态
 const selectedAgents = ref<Set<string>>(new Set())
 const dailynoteDecisions = ref<Map<string, DailynoteDecision>>(new Map())
+const knowledgeDecisions = ref<Map<string, KnowledgeDecision>>(new Map())
 const selectedTvs = ref<Set<string>>(new Set())
 const selectedImages = ref<Set<string>>(new Set())
 const pluginMatch = ref<PluginMatch | null>(null)
 const pluginDecisions = ref<Map<string, PluginInstallDecision>>(new Map())
-const copyVectors = ref(true)
+const copyVectors = ref(false)
+
+// 🪄 智能推荐
+const autoPlanning = ref(false)
 
 // Step 3 — config merge
 const configDiff = ref<ConfigDiff | null>(null)
@@ -205,6 +210,18 @@ async function doScan() {
     }
     dailynoteDecisions.value = dnMap
 
+    // 默认 knowledge 分流（Agent 同名 → personal，其余 → public）
+    const kMap = new Map<string, KnowledgeDecision>()
+    const agentNames = new Set(result.agents.map(a => a.name))
+    for (const k of (result.knowledge || [])) {
+      if (agentNames.has(k.name)) {
+        kMap.set(k.name, { sourceName: k.name, targetType: 'personal', agentName: k.name, publicDirName: k.name })
+      } else {
+        kMap.set(k.name, { sourceName: k.name, targetType: 'public', publicDirName: k.name })
+      }
+    }
+    knowledgeDecisions.value = kMap
+
     // 调 match-plugins
     try {
       pluginMatch.value = await matchPlugins(result.plugins)
@@ -212,6 +229,7 @@ async function doScan() {
       for (const p of pluginMatch.value.installable) {
         pm.set(p.name, {
           name: p.name,
+          source: p.source,
           mergeConfig: p.hasUpstreamConfig,
           copyVectorStore: false,
           enable: p.upstreamEnabled,
@@ -225,6 +243,44 @@ async function doScan() {
     step.value = 2
   } finally {
     scanning.value = false
+  }
+}
+
+// 🪄 智能推荐：一键生成完整默认 plan 并直接跳 Step 4 预览
+async function doAutoPlan() {
+  const sp = sourcePath.value.trim()
+  if (!sp) return
+  autoPlanning.value = true
+  try {
+    const result = await autoPlan(sp)
+    scanResult.value = result.scan
+    pluginMatch.value = result.match
+
+    // 把 autoPlan 返回填充到 decisions（之后 plan computed 会自动汇总）
+    selectedAgents.value = new Set(result.plan.agents || [])
+    selectedTvs.value = new Set(result.plan.tvs || [])
+    selectedImages.value = new Set(result.plan.images || [])
+
+    const dnMap = new Map<string, DailynoteDecision>()
+    for (const d of (result.plan.dailynotes || [])) dnMap.set(d.sourceName, d)
+    dailynoteDecisions.value = dnMap
+
+    const kMap = new Map<string, KnowledgeDecision>()
+    for (const k of (result.plan.knowledge || [])) kMap.set(k.sourceName, k)
+    knowledgeDecisions.value = kMap
+
+    const pm = new Map<string, PluginInstallDecision>()
+    for (const p of (result.plan.plugins || [])) pm.set(p.name, p)
+    pluginDecisions.value = pm
+
+    copyVectors.value = result.plan.copyVectors || false
+
+    // 跳到 Step 4 预览（config merge 可跳过，除非用户点 Step 3 手动处理）
+    step.value = 4
+  } catch (e) {
+    alert(`智能推荐失败: ${(e as Error).message}`)
+  } finally {
+    autoPlanning.value = false
   }
 }
 
@@ -253,6 +309,7 @@ const plan = computed<MigrationPlan>(() => ({
   doBackup: true,
   agents: [...selectedAgents.value],
   dailynotes: [...dailynoteDecisions.value.values()],
+  knowledge: [...knowledgeDecisions.value.values()],
   tvs: [...selectedTvs.value],
   images: [...selectedImages.value],
   plugins: [...pluginDecisions.value.values()],
@@ -268,6 +325,7 @@ const planSummary = computed(() => {
   return [
     { label: 'Agents', value: (p.agents || []).length },
     { label: 'Dailynote', value: (p.dailynotes || []).filter(d => d.targetType !== 'skip').length },
+    { label: 'Knowledge', value: (p.knowledge || []).filter(k => k.targetType !== 'skip').length },
     { label: 'TVS', value: (p.tvs || []).length },
     { label: 'Images', value: (p.images || []).length },
     { label: 'Plugins', value: (p.plugins || []).length },
@@ -373,7 +431,13 @@ function togglePlugin(name: string) {
   if (m.has(name)) m.delete(name)
   else {
     const pm = pluginMatch.value?.installable.find(p => p.name === name)
-    if (pm) m.set(name, { name, mergeConfig: pm.hasUpstreamConfig, copyVectorStore: false, enable: pm.upstreamEnabled })
+    if (pm) m.set(name, {
+      name,
+      source: pm.source,
+      mergeConfig: pm.hasUpstreamConfig,
+      copyVectorStore: false,
+      enable: pm.upstreamEnabled,
+    })
   }
   pluginDecisions.value = m
 }
@@ -550,7 +614,23 @@ function stepLabel(n: Step): string {
       </div>
       <div v-if="scanResult?.valid && scanResult.sourceType" class="alert alert-success">
         ✅ 已识别 {{ sourceTypeLabel(scanResult.sourceType) }}<span v-if="sourceLabel">（{{ sourceLabel }}）</span>
-        · Agents {{ scanResult.summary.agents }} · 日记 {{ scanResult.summary.dailynotes }} · 插件 {{ scanResult.summary.plugins }}
+        · Agents {{ scanResult.summary.agents }} · 日记 {{ scanResult.summary.dailynotes }}
+        <span v-if="scanResult.summary.knowledge"> · 知识 {{ scanResult.summary.knowledge }}</span>
+        · 插件 {{ scanResult.summary.plugins }}
+      </div>
+
+      <!-- 🪄 智能推荐按钮：扫描通过即可一键生成 -->
+      <div v-if="scanResult?.valid" class="auto-plan-cta">
+        <div class="cta-text">
+          <span class="material-symbols-outlined big">auto_awesome</span>
+          <div>
+            <strong>🪄 智能推荐：一键生成默认迁移方案</strong>
+            <small>Agent 全迁 · 日记/知识按 Agent 同名自动分流 · 插件本地优先远程兜底 · 配置不改（可回 Step 3 手动处理）</small>
+          </div>
+        </div>
+        <button class="btn btn-primary btn-large" @click="doAutoPlan" :disabled="autoPlanning">
+          {{ autoPlanning ? '生成中...' : '🪄 智能推荐（直接跳预览）' }}
+        </button>
       </div>
 
       <!-- 备份历史 -->
@@ -665,15 +745,29 @@ function stepLabel(n: Step): string {
         <div v-if="!pluginMatch" class="muted">插件匹配中...</div>
         <div v-else>
           <div v-if="pluginMatch.installable.length > 0" class="sub-section">
-            <h3>✅ 可从 Junior 插件仓库安装 ({{ pluginMatch.installable.length }})</h3>
+            <h3>✅ 可自动安装 ({{ pluginMatch.installable.length }})</h3>
+            <p class="muted small">
+              本地仓库：{{ pluginMatch.installable.filter(p => p.source === 'localRepo').length }} 个 ·
+              远程商店：{{ pluginMatch.installable.filter(p => p.source === 'remoteStore').length }} 个
+            </p>
             <div class="plugin-list">
               <div v-for="p in pluginMatch.installable" :key="p.name" class="plugin-row"
                 :class="{ selected: pluginDecisions.has(p.name) }">
                 <label class="plugin-toggle">
                   <input type="checkbox" :checked="pluginDecisions.has(p.name)" @change="togglePlugin(p.name)" />
                   <strong>{{ p.name }}</strong>
+                  <span class="source-badge" :class="p.source">
+                    {{ p.source === 'localRepo' ? '📁 本地' : '🌐 远程' }}
+                  </span>
                 </label>
-                <div class="muted">上游 {{ formatBytes(p.upstreamSize) }} / 仓库 {{ formatBytes(p.repoSize) }}</div>
+                <div class="muted">
+                  上游 {{ formatBytes(p.upstreamSize) }}
+                  <span v-if="p.source === 'localRepo' && p.repoSize"> / 本地 {{ formatBytes(p.repoSize) }}</span>
+                  <span v-if="p.source === 'remoteStore' && p.remoteVersion"> / 远程 v{{ p.remoteVersion }}</span>
+                </div>
+                <div v-if="p.source === 'remoteStore' && p.remoteDescription" class="muted small">
+                  {{ p.remoteDescription }}
+                </div>
                 <div v-if="pluginDecisions.has(p.name)" class="plugin-opts">
                   <label><input type="checkbox"
                     :checked="pluginDecisions.get(p.name)?.mergeConfig"
@@ -701,11 +795,11 @@ function stepLabel(n: Step): string {
             </div>
           </div>
 
-          <div v-if="pluginMatch.notInRepo.length > 0" class="sub-section">
-            <h3>⚠️ Junior 不兼容 ({{ pluginMatch.notInRepo.length }})</h3>
-            <p class="muted small">这些上游插件在 Junior 插件仓库中没有对应版本，跳过。</p>
+          <div v-if="pluginMatch.notAvailable.length > 0" class="sub-section">
+            <h3>⚠️ 本体/本地/远程均无 ({{ pluginMatch.notAvailable.length }})</h3>
+            <p class="muted small">这些上游插件在 Junior 的任何来源都没有，自动跳过。</p>
             <div class="chip-list">
-              <span v-for="n in pluginMatch.notInRepo" :key="n.name" class="chip warn" :title="n.reason">{{ n.name }}</span>
+              <span v-for="n in pluginMatch.notAvailable" :key="n.name" class="chip warn" :title="n.reason">{{ n.name }}</span>
             </div>
           </div>
         </div>
@@ -1116,6 +1210,46 @@ function stepLabel(n: Step): string {
     margin-top: 0.4rem; font-size: 0.85rem;
     padding-top: 0.4rem; border-top: 1px dashed #eee;
   }
+}
+.source-badge {
+  display: inline-block;
+  padding: 1px 8px;
+  font-size: 0.7rem;
+  border-radius: 10px;
+  font-weight: 500;
+  margin-left: 0.3rem;
+  &.localRepo { background: #e8f5e9; color: #2e7d32; }
+  &.remoteStore { background: #e3f2fd; color: #1565c0; }
+}
+
+// 🪄 智能推荐大按钮
+.auto-plan-cta {
+  margin-top: 1rem;
+  padding: 1rem 1.2rem;
+  background: linear-gradient(135deg, #fce4ec 0%, #f8bbd0 100%);
+  border: 2px dashed var(--color-primary, #e91e63);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  .cta-text {
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+    flex: 1;
+    min-width: 240px;
+    .material-symbols-outlined.big { font-size: 2rem; color: var(--color-primary, #e91e63); }
+    strong { display: block; margin-bottom: 0.2rem; color: #880e4f; }
+    small { color: #6a1b2e; font-size: 0.8rem; line-height: 1.5; }
+  }
+}
+.btn-large {
+  padding: 0.8rem 1.4rem;
+  font-size: 1rem;
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgba(233, 30, 99, 0.3);
 }
 .chip-list { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-top: 0.4rem; }
 .chip {
