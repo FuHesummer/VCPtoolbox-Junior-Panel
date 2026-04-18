@@ -33,16 +33,6 @@
 
     <p v-if="dirty" class="dirty-banner">⚠️ 有 {{ dirtyCount }} 个字段未保存，保存后重启服务生效</p>
 
-    <!-- 引导：被专属页面接管的字段提示 -->
-    <RouterLink v-if="dedicatedFieldsCount > 0 && !rawMode" :to="{ name: 'model-prompts' }" class="dedicated-link card">
-      <span class="material-symbols-outlined">tune</span>
-      <div class="dl-info">
-        <strong>{{ dedicatedFieldsCount }} 个模型专属指令字段已迁移到专属页面</strong>
-        <small>SarModel* / SarPrompt* 由「模型提示词」页面统一管理，避免在全局配置和专属页双源编辑</small>
-      </div>
-      <span class="material-symbols-outlined arrow">arrow_forward</span>
-    </RouterLink>
-
     <!-- 表单模式（master-detail：左侧分类，右侧字段网格） -->
     <div v-if="!rawMode" class="content">
       <EmptyState v-if="loading" icon="sync" message="正在加载..." />
@@ -184,21 +174,9 @@ function isBannerLine(text: string): boolean {
   return BANNER_REGEX.test(text.trim()) && text.trim().length >= 3
 }
 
-// 由专属页面管理的字段（不在全局配置里渲染，避免双源编辑）
-//   SarModel<N> / SarPrompt<N>  → ModelPromptsView（模型提示词专属页）
-const MANAGED_BY_DEDICATED_PAGE = /^Sar(Model|Prompt)\d+$/
-
-// 计数：被专属页面接管的字段数（用于顶部提示）
-const dedicatedFieldsCount = computed(() => {
-  let n = 0
-  for (const item of items.value) {
-    if (item.kind === 'entry' && MANAGED_BY_DEDICATED_PAGE.test(item.key)) n++
-  }
-  return n
-})
+// Sar* 字段已完全迁移到 sarprompt.json，config.env 中不再包含这些字段
 
 // 不再受 search 影响 —— search 由 displayedFields 单独处理
-// 同时过滤掉由专属页面管理的字段（如 SarModel*/SarPrompt*）
 const sections = computed<Section[]>(() => {
   const secs: Section[] = []
   let currentTitle = ''
@@ -224,9 +202,6 @@ const sections = computed<Section[]>(() => {
       }
       return
     }
-
-    // 跳过由专属页面管理的字段
-    if (MANAGED_BY_DEDICATED_PAGE.test(item.key)) return
 
     if (!secs.length || secs[secs.length - 1].title !== currentTitle) {
       secs.push({ title: currentTitle, entries: [] })
@@ -385,39 +360,6 @@ onMounted(reload)
   border-radius: var(--radius-md);
   color: var(--highlight-text);
   font-size: 13px;
-}
-
-.dedicated-link {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin: 0 24px 14px;
-  padding: 12px 18px;
-  text-decoration: none;
-  color: inherit;
-  background: linear-gradient(135deg, rgba(228, 104, 156, 0.06), rgba(155, 109, 208, 0.06));
-  border: 1px dashed var(--button-bg);
-  border-radius: var(--radius-md);
-  transition: all 0.15s;
-  cursor: pointer;
-  &:hover {
-    background: linear-gradient(135deg, rgba(228, 104, 156, 0.12), rgba(155, 109, 208, 0.12));
-    border-style: solid;
-  }
-  .material-symbols-outlined {
-    font-size: 22px;
-    color: var(--button-bg);
-  }
-  .dl-info {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    line-height: 1.4;
-    strong { font-size: 13px; color: var(--primary-text); }
-    small { font-size: 11px; color: var(--secondary-text); margin-top: 2px; }
-  }
-  .arrow { font-size: 18px; opacity: 0.6; }
-  &:hover .arrow { opacity: 1; transform: translateX(2px); }
 }
 
 .content {
