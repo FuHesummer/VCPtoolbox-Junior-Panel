@@ -3,18 +3,38 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import {
   scanSource, diffConfig, matchPlugins, executeMigration,
   listBackups, getStatus, cancel, createBackup,
-  formatBytes,
+  formatBytes, sourceTypeLabel,
+  uploadSource, listUploads, deleteUpload,
+  getWebdavConfig, testWebdav, listWebdavBackups, downloadFromWebdav,
   type ScanResult, type ConfigDiff, type PluginMatch,
   type MigrationPlan, type SseLogEvent, type BackupItem,
   type DailynoteDecision, type PluginInstallDecision,
+  type UploadedItem, type WebdavConfig, type WebdavItem,
 } from '@/api/migration'
 
 type Step = 1 | 2 | 3 | 4 | 5
+type SourceMode = 'dir' | 'upload' | 'webdav'
 
 const step = ref<Step>(1)
+const sourceMode = ref<SourceMode>('dir')
 const sourcePath = ref('')
+const sourceLabel = ref('')        // 给用户看的源描述（文件名或目录名）
 const scanning = ref(false)
 const scanResult = ref<ScanResult | null>(null)
+
+// 上传模式
+const uploading = ref(false)
+const uploadProgress = ref(0)
+const selectedFile = ref<File | null>(null)
+const uploadedItems = ref<UploadedItem[]>([])
+
+// 坚果云模式
+const webdavConfig = ref<WebdavConfig | null>(null)
+const webdavTesting = ref(false)
+const webdavTestResult = ref<{ ok: boolean; error?: string } | null>(null)
+const webdavItems = ref<WebdavItem[]>([])
+const webdavLoading = ref(false)
+const webdavDownloading = ref(false)
 
 // Step 2 — 选择状态
 const selectedAgents = ref<Set<string>>(new Set())
@@ -48,6 +68,8 @@ let statusTimer: number | null = null
 onMounted(async () => {
   await refreshStatus()
   await refreshBackups()
+  await refreshUploads()
+  await refreshWebdavConfig()
   statusTimer = window.setInterval(refreshStatus, 5000)
 })
 onBeforeUnmount(() => {
@@ -61,15 +83,110 @@ async function refreshStatus() {
 async function refreshBackups() {
   try { backups.value = await listBackups() } catch {}
 }
+async function refreshUploads() {
+  try { uploadedItems.value = await listUploads() } catch {}
+}
+async function refreshWebdavConfig() {
+  try { webdavConfig.value = await getWebdavConfig() } catch {}
+}
+
+// ======== 上传 VCPBackUp zip ========
+
+function onFilePick(e: Event) {
+  const input = e.target as HTMLInputElement
+  selectedFile.value = input.files?.[0] || null
+}
+
+async function doUpload() {
+  if (!selectedFile.value) return
+  uploading.value = true
+  uploadProgress.value = 0
+  try {
+    const resp = await uploadSource(selectedFile.value)
+    sourcePath.value = resp.sourcePath
+    sourceLabel.value = resp.filename
+    selectedFile.value = null
+    await refreshUploads()
+    // 上传后自动 scan
+    await doScan()
+  } catch (e) {
+    alert(`上传失败: ${(e as Error).message}`)
+  } finally {
+    uploading.value = false
+    uploadProgress.value = 0
+  }
+}
+
+function usePrevUpload(item: UploadedItem) {
+  sourcePath.value = item.absPath
+  sourceLabel.value = item.filename
+  doScan()
+}
+
+async function doDeleteUpload(item: UploadedItem) {
+  if (!confirm(`删除上传的 ${item.filename}？`)) return
+  await deleteUpload(item.filename)
+  await refreshUploads()
+}
+
+// ======== 坚果云 WebDAV ========
+
+async function doTestWebdav() {
+  webdavTesting.value = true
+  try {
+    const r = await testWebdav()
+    webdavTestResult.value = { ok: r.ok, error: r.error }
+    if (r.ok) await refreshWebdavList()
+  } finally {
+    webdavTesting.value = false
+  }
+}
+
+async function refreshWebdavList() {
+  webdavLoading.value = true
+  try {
+    webdavItems.value = await listWebdavBackups()
+  } catch (e) {
+    webdavTestResult.value = { ok: false, error: (e as Error).message }
+  } finally {
+    webdavLoading.value = false
+  }
+}
+
+async function doDownloadWebdav(item: WebdavItem) {
+  webdavDownloading.value = true
+  try {
+    const r = await downloadFromWebdav(item.filename)
+    sourcePath.value = r.sourcePath
+    sourceLabel.value = item.filename
+    await refreshUploads()
+    await doScan()
+  } catch (e) {
+    alert(`下载失败: ${(e as Error).message}`)
+  } finally {
+    webdavDownloading.value = false
+  }
+}
+
+function switchMode(mode: SourceMode) {
+  sourceMode.value = mode
+  scanResult.value = null
+  sourcePath.value = ''
+  sourceLabel.value = ''
+  if (mode === 'webdav' && webdavItems.value.length === 0 && webdavConfig.value?.enabled) {
+    refreshWebdavList()
+  }
+}
 
 // ======== Step 1: Scan ========
 
 async function doScan() {
-  if (!sourcePath.value.trim()) return
+  const sp = sourcePath.value.trim()
+  if (!sp) return
   scanning.value = true
   scanResult.value = null
   try {
-    const result = await scanSource(sourcePath.value.trim())
+    const result = await scanSource(sp)
     scanResult.value = result
     if (!result.valid) return
 
@@ -300,25 +417,145 @@ function stepLabel(n: Step): string {
 
     <!-- Step 1: 选源 -->
     <section v-if="step === 1" class="panel">
-      <h2>1. 选择上游 VCPToolBox 根目录</h2>
+      <h2>1. 选择迁移源</h2>
       <p class="hint">
-        输入上游项目的本地绝对路径，例如 <code>D:\path\to\VCPToolBox</code>。
-        系统将验证目录合法性（需包含 Plugin.js / Agent / TVStxt）。
+        支持三种源：本地 VCPToolBox 目录、上传的 VCPBackUp zip 包、或从坚果云直接拉取。
       </p>
-      <div class="path-input">
-        <input v-model="sourcePath" placeholder="上游 VCPToolBox 根目录绝对路径" @keyup.enter="doScan" />
-        <button class="btn btn-primary" @click="doScan" :disabled="scanning || !sourcePath.trim()">
-          {{ scanning ? '扫描中...' : '扫描' }}
+
+      <!-- 源模式切换器 -->
+      <div class="source-mode-tabs">
+        <button class="mode-tab" :class="{ active: sourceMode === 'dir' }" @click="switchMode('dir')">
+          <span class="material-symbols-outlined">folder</span>
+          <div class="mode-text">
+            <strong>本地目录</strong>
+            <small>已解压的 VCPToolBox 根目录</small>
+          </div>
+        </button>
+        <button class="mode-tab" :class="{ active: sourceMode === 'upload' }" @click="switchMode('upload')">
+          <span class="material-symbols-outlined">upload_file</span>
+          <div class="mode-text">
+            <strong>上传 VCPBackUp 包</strong>
+            <small>VCPServer_Backup_*.zip 或 VCP_Full_Backup.zip</small>
+          </div>
+        </button>
+        <button class="mode-tab" :class="{ active: sourceMode === 'webdav' }" @click="switchMode('webdav')">
+          <span class="material-symbols-outlined">cloud_download</span>
+          <div class="mode-text">
+            <strong>从坚果云拉取</strong>
+            <small>WebDAV 自动同步</small>
+          </div>
         </button>
       </div>
 
+      <!-- 本地目录模式 -->
+      <div v-if="sourceMode === 'dir'" class="mode-panel">
+        <p class="hint">输入已解压的 VCPToolBox 根目录绝对路径，例如 <code>D:\path\to\VCPToolBox</code>。</p>
+        <div class="path-input">
+          <input v-model="sourcePath" placeholder="上游 VCPToolBox 根目录绝对路径" @keyup.enter="doScan" />
+          <button class="btn btn-primary" @click="doScan" :disabled="scanning || !sourcePath.trim()">
+            {{ scanning ? '扫描中...' : '扫描' }}
+          </button>
+        </div>
+      </div>
+
+      <!-- 上传模式 -->
+      <div v-if="sourceMode === 'upload'" class="mode-panel">
+        <p class="hint">从上游 <a href="https://github.com/lioensky/VCPBcakUpDEV" target="_blank">VCPBackUp</a> 产出的 zip 可直接上传，系统自动识别格式并解压。</p>
+        <div class="upload-zone">
+          <input type="file" accept=".zip" id="vcpbackup-file" @change="onFilePick" :disabled="uploading" />
+          <label for="vcpbackup-file" class="upload-dropzone" :class="{ disabled: uploading }">
+            <span class="material-symbols-outlined big">cloud_upload</span>
+            <div>
+              <strong v-if="selectedFile">{{ selectedFile.name }}</strong>
+              <strong v-else>点击选择 zip 文件</strong>
+              <small v-if="selectedFile">{{ formatBytes(selectedFile.size) }}</small>
+              <small v-else>支持 VCPServer_Backup_*.zip / VCP_Full_Backup*.zip</small>
+            </div>
+          </label>
+          <button class="btn btn-primary" @click="doUpload" :disabled="!selectedFile || uploading">
+            <span class="material-symbols-outlined">upload</span>
+            {{ uploading ? '上传中...' : '上传并扫描' }}
+          </button>
+        </div>
+
+        <div v-if="uploadedItems.length > 0" class="prev-uploads">
+          <h3>最近上传</h3>
+          <div v-for="it in uploadedItems.slice(0, 5)" :key="it.filename" class="upload-row">
+            <div class="upload-main">
+              <span class="material-symbols-outlined">archive</span>
+              <strong>{{ it.filename }}</strong>
+              <span class="muted">{{ formatBytes(it.size) }} · {{ new Date(it.createdAt).toLocaleString() }}</span>
+            </div>
+            <div class="upload-actions">
+              <button class="btn-tiny" @click="usePrevUpload(it)">复用扫描</button>
+              <button class="btn-tiny danger" @click="doDeleteUpload(it)">删除</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- WebDAV 模式 -->
+      <div v-if="sourceMode === 'webdav'" class="mode-panel">
+        <div v-if="!webdavConfig?.enabled" class="alert alert-warn">
+          <span class="material-symbols-outlined">warning</span>
+          坚果云同步未启用。请在 <code>config.env</code> 设置 <code>JianguoyunDEV=true</code> 及账号密码，然后重启服务。
+        </div>
+        <div v-else>
+          <div class="webdav-status">
+            <div class="webdav-config-info">
+              <span>📡 {{ webdavConfig.url }}{{ webdavConfig.basePath }}</span>
+              <span class="muted">账号 {{ webdavConfig.userConfigured ? '✓' : '✗' }} · 密码 {{ webdavConfig.passwordConfigured ? '✓' : '✗' }}</span>
+            </div>
+            <div class="webdav-actions">
+              <button class="btn-tiny" @click="doTestWebdav" :disabled="webdavTesting">
+                {{ webdavTesting ? '测试中...' : '测试连接' }}
+              </button>
+              <button class="btn-tiny" @click="refreshWebdavList" :disabled="webdavLoading">
+                {{ webdavLoading ? '加载中...' : '刷新列表' }}
+              </button>
+            </div>
+          </div>
+
+          <div v-if="webdavTestResult" class="alert" :class="webdavTestResult.ok ? 'alert-success' : 'alert-error'">
+            {{ webdavTestResult.ok ? '✅ 连接成功' : `❌ ${webdavTestResult.error}` }}
+          </div>
+
+          <div v-if="webdavItems.length > 0" class="webdav-list">
+            <h3>远程备份</h3>
+            <div v-for="it in webdavItems" :key="it.filename" class="webdav-row">
+              <div class="webdav-main">
+                <span class="material-symbols-outlined">backup</span>
+                <strong>{{ it.filename }}</strong>
+                <span class="muted">{{ formatBytes(it.size) }} · {{ it.lastModified || '未知时间' }}</span>
+              </div>
+              <button class="btn btn-primary btn-small"
+                @click="doDownloadWebdav(it)"
+                :disabled="webdavDownloading || scanning">
+                <span class="material-symbols-outlined">download</span>
+                下载并扫描
+              </button>
+            </div>
+          </div>
+          <div v-else-if="!webdavLoading" class="muted">暂无远程备份，可先导出并上传（备份管理页）</div>
+        </div>
+      </div>
+
+      <!-- 扫描结果提示 -->
+      <div v-if="scanning" class="alert">
+        <span class="material-symbols-outlined">hourglass_top</span>
+        正在扫描源<span v-if="sourceLabel">（{{ sourceLabel }}）</span>...
+      </div>
       <div v-if="scanResult && !scanResult.valid" class="alert alert-error">
         ❌ {{ scanResult.reason }}
+      </div>
+      <div v-if="scanResult?.valid && scanResult.sourceType" class="alert alert-success">
+        ✅ 已识别 {{ sourceTypeLabel(scanResult.sourceType) }}<span v-if="sourceLabel">（{{ sourceLabel }}）</span>
+        · Agents {{ scanResult.summary.agents }} · 日记 {{ scanResult.summary.dailynotes }} · 插件 {{ scanResult.summary.plugins }}
       </div>
 
       <!-- 备份历史 -->
       <div v-if="backups.length > 0" class="backup-list">
-        <h3>已有备份</h3>
+        <h3>已有 Junior 备份（用于回滚）</h3>
         <ul>
           <li v-for="b in backups.slice(0, 5)" :key="b.name">
             <span class="material-symbols-outlined">archive</span>
@@ -670,7 +907,128 @@ function stepLabel(n: Step): string {
   border-left: 4px solid var(--color-warn, #ff9800);
   &.alert-error { background: #ffebee; border-left-color: #c62828; }
   &.alert-warn { background: #fff8e1; border-left-color: #f57c00; }
+  &.alert-success { background: #e8f5e9; border-left-color: #2e7d32; }
 }
+
+// ========= 源模式选择器 =========
+.source-mode-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.6rem;
+  margin-bottom: 1rem;
+  .mode-tab {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.8rem 1rem;
+    background: var(--color-surface, #fff);
+    border: 2px solid var(--color-border, #e0e0e0);
+    border-radius: 8px;
+    cursor: pointer;
+    text-align: left;
+    transition: all 0.15s;
+    &:hover { background: var(--color-hover, #fafafa); }
+    &.active {
+      border-color: var(--color-primary, #e91e63);
+      background: var(--color-primary-bg, #fce4ec);
+    }
+    .material-symbols-outlined { font-size: 2rem; color: var(--color-primary, #e91e63); }
+    .mode-text { display: flex; flex-direction: column; }
+    strong { font-size: 0.9rem; }
+    small { font-size: 0.75rem; color: var(--color-text-muted, #888); margin-top: 2px; }
+  }
+}
+.mode-panel { margin-top: 0.5rem; }
+
+// ========= 上传 UI =========
+.upload-zone {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  input[type=file] { display: none; }
+  .upload-dropzone {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 2rem 1rem;
+    border: 2px dashed var(--color-border, #ccc);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.15s;
+    &:hover:not(.disabled) {
+      border-color: var(--color-primary, #e91e63);
+      background: var(--color-hover, #fafafa);
+    }
+    &.disabled { opacity: 0.5; cursor: not-allowed; }
+    .material-symbols-outlined.big { font-size: 3rem; color: var(--color-primary, #e91e63); }
+    div { text-align: center; }
+    strong { display: block; }
+    small { display: block; color: var(--color-text-muted, #888); font-size: 0.8rem; margin-top: 4px; }
+  }
+}
+.prev-uploads {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--color-border, #eee);
+  h3 { font-size: 0.9rem; margin: 0 0 0.5rem 0; }
+  .upload-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.5rem 0.8rem;
+    border: 1px solid var(--color-border, #eee);
+    border-radius: 4px;
+    margin-bottom: 0.3rem;
+    .upload-main {
+      display: flex;
+      gap: 0.5rem;
+      align-items: center;
+      strong { font-size: 0.9rem; }
+      .muted { font-size: 0.75rem; color: #888; margin-left: 0.3rem; }
+    }
+    .upload-actions { display: flex; gap: 0.4rem; }
+  }
+}
+
+// ========= WebDAV UI =========
+.webdav-status {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.7rem 1rem;
+  background: var(--color-surface-alt, #f5f5f5);
+  border-radius: 6px;
+  margin-bottom: 0.8rem;
+  .webdav-config-info {
+    display: flex; flex-direction: column;
+    span { font-size: 0.85rem; }
+    .muted { font-size: 0.75rem; color: #888; }
+  }
+  .webdav-actions { display: flex; gap: 0.4rem; }
+}
+.webdav-list {
+  h3 { font-size: 0.9rem; margin: 0 0 0.5rem 0; }
+  .webdav-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.6rem 0.8rem;
+    border: 1px solid var(--color-border, #eee);
+    border-radius: 4px;
+    margin-bottom: 0.3rem;
+    .webdav-main {
+      display: flex;
+      gap: 0.5rem;
+      align-items: center;
+      strong { font-size: 0.9rem; }
+      .muted { font-size: 0.75rem; color: #888; margin-left: 0.3rem; }
+    }
+  }
+}
+
+.btn.btn-small { padding: 0.3rem 0.7rem; font-size: 0.82rem; }
+.btn-tiny.danger { background: #ffebee; color: #c62828; border-color: #ffcdd2; &:hover { background: #ffcdd2; } }
 .backup-list {
   margin-top: 1.5rem;
   h3 { font-size: 0.95rem; margin-bottom: 0.5rem; }

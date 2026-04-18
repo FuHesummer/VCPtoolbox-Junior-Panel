@@ -1,4 +1,4 @@
-// 上游 VCPToolBox 一键迁移 API
+// 上游 VCPToolBox 一键迁移 + VCPBackUp 备份管理 API
 import { apiFetch } from './client'
 
 // ============ 类型定义 ============
@@ -29,10 +29,13 @@ export interface ScanAgentMap {
   raw: Record<string, unknown>
 }
 
+export type SourceType = 'dir' | 'vcpserver-zip' | 'vcpfull-zip' | 'generic-zip'
+
 export interface ScanResult {
   valid: boolean
   reason?: string
   sourcePath: string
+  sourceType?: SourceType
   scanAt?: string
   agents: ScanAgent[]
   dailynotes: ScanDailynote[]
@@ -254,6 +257,208 @@ export function executeMigration(
   return { abort: () => controller.abort() }
 }
 
+// ============ 上传 VCPBackUp zip ============
+
+export interface UploadResponse {
+  ok: boolean
+  sourcePath: string
+  filename: string
+  savedAs: string
+  size: number
+  note?: string
+}
+
+export interface UploadedItem {
+  filename: string
+  absPath: string
+  size: number
+  createdAt: string
+}
+
+// 上传 VCPBackUp zip（multipart/form-data）
+export async function uploadSource(file: File): Promise<UploadResponse> {
+  const fd = new FormData()
+  fd.append('file', file)
+  const res = await fetch('/admin_api/migration/upload', { method: 'POST', body: fd })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`HTTP ${res.status}: ${text}`)
+  }
+  return await res.json()
+}
+
+export async function listUploads(): Promise<UploadedItem[]> {
+  return apiFetch('/admin_api/migration/uploads')
+}
+
+export async function deleteUpload(name: string): Promise<{ ok: boolean }> {
+  return apiFetch(`/admin_api/migration/uploads/${encodeURIComponent(name)}`, { method: 'DELETE' })
+}
+
+// ============ 坚果云 WebDAV ============
+
+export interface WebdavConfig {
+  enabled: boolean
+  url: string
+  basePath: string
+  userConfigured: boolean
+  passwordConfigured: boolean
+}
+
+export interface WebdavTestResult {
+  ok: boolean
+  error?: string
+  statusCode?: number
+  url?: string
+  created?: boolean
+}
+
+export interface WebdavItem {
+  filename: string
+  href: string
+  isDirectory: boolean
+  size: number
+  lastModified: string | null
+}
+
+export interface WebdavDownloadResult {
+  ok: boolean
+  localPath: string
+  sourcePath: string
+  size: number
+}
+
+export async function getWebdavConfig(): Promise<WebdavConfig> {
+  return apiFetch('/admin_api/migration/webdav/config')
+}
+
+export async function testWebdav(): Promise<WebdavTestResult> {
+  return apiFetch('/admin_api/migration/webdav/test', { method: 'POST' })
+}
+
+export async function listWebdavBackups(): Promise<WebdavItem[]> {
+  return apiFetch('/admin_api/migration/webdav/list')
+}
+
+export async function downloadFromWebdav(filename: string): Promise<WebdavDownloadResult> {
+  return apiFetch('/admin_api/migration/webdav/download', {
+    method: 'POST',
+    body: { filename },
+  })
+}
+
+export async function uploadToWebdav(filePath: string, remoteName?: string): Promise<{ ok: boolean; statusCode: number; remoteName: string; size: number }> {
+  return apiFetch('/admin_api/migration/webdav/upload', {
+    method: 'POST',
+    body: { filePath, remoteName },
+  })
+}
+
+export async function removeWebdavFile(filename: string): Promise<{ ok: boolean }> {
+  return apiFetch(`/admin_api/migration/webdav/${encodeURIComponent(filename)}`, { method: 'DELETE' })
+}
+
+// ============ 导出 VCPBackUp 兼容包 ============
+
+export interface ExportItem {
+  name: string
+  filename?: string           // 仅 exportBackup 直接返回时有，listExports 用 name
+  relPath: string
+  absPath: string
+  size: number
+  sizeHuman: string
+  createdAt: string
+  type: 'full' | 'server'
+  fileCount?: number
+  innerZip?: string
+}
+
+export interface ExportResult {
+  ok: boolean
+  server: ExportItem
+  full?: ExportItem
+  upload?: { ok: boolean; remoteName: string; size: number }
+}
+
+export async function exportBackup(opts?: { asFull?: boolean; uploadToWebdav?: boolean }): Promise<ExportResult> {
+  return apiFetch('/admin_api/migration/export', {
+    method: 'POST',
+    body: opts || {},
+  })
+}
+
+export async function listExports(): Promise<ExportItem[]> {
+  return apiFetch('/admin_api/migration/exports')
+}
+
+export async function deleteExport(name: string): Promise<{ ok: boolean }> {
+  return apiFetch(`/admin_api/migration/exports/${encodeURIComponent(name)}`, { method: 'DELETE' })
+}
+
+// 触发浏览器下载
+export function downloadExportUrl(name: string): string {
+  return `/admin_api/migration/exports/${encodeURIComponent(name)}/download`
+}
+
+// ============ 定期备份调度 ============
+
+export interface BackupScheduleConfig {
+  enabled: boolean
+  cron: string
+  keepCount: number
+  keepDays: number
+  uploadToWebdav: boolean
+  uploadAsFull: boolean
+  lastRun: string | null
+  lastStatus: 'success' | 'error' | null
+  active?: boolean
+  nextInvocation?: string | null
+}
+
+export interface BackupScheduleHistory {
+  startedAt: string
+  finishedAt?: string
+  trigger: 'manual' | 'cron'
+  status: 'running' | 'success' | 'error'
+  error?: string
+  stages: Record<string, unknown>
+}
+
+export async function getSchedule(): Promise<BackupScheduleConfig> {
+  return apiFetch('/admin_api/migration/schedule')
+}
+
+export async function setSchedule(patch: Partial<BackupScheduleConfig>): Promise<{ ok: boolean; config: BackupScheduleConfig; applied: { scheduled: boolean; cron?: string; nextInvocation?: string | null; error?: string } }> {
+  return apiFetch('/admin_api/migration/schedule', {
+    method: 'POST',
+    body: patch,
+  })
+}
+
+export async function triggerSchedule(): Promise<BackupScheduleHistory> {
+  return apiFetch('/admin_api/migration/schedule/trigger', { method: 'POST' })
+}
+
+export async function getScheduleHistory(): Promise<BackupScheduleHistory[]> {
+  return apiFetch('/admin_api/migration/schedule/history')
+}
+
+// ============ 临时目录管理 ============
+
+export interface TempDirItem {
+  name: string
+  path: string
+  createdAt: string
+}
+
+export async function listTempDirs(): Promise<TempDirItem[]> {
+  return apiFetch('/admin_api/migration/temp-list')
+}
+
+export async function cleanupTemp(): Promise<{ removed: number; error?: string }> {
+  return apiFetch('/admin_api/migration/cleanup-temp', { method: 'POST' })
+}
+
 // ============ 工具函数 ============
 
 export function formatBytes(bytes: number): string {
@@ -261,4 +466,15 @@ export function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(2)} MB`
   return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`
+}
+
+// 标签化源类型
+export function sourceTypeLabel(type?: SourceType): string {
+  if (!type) return '未知'
+  return {
+    'dir': '本地目录',
+    'vcpserver-zip': 'VCPServer 备份包',
+    'vcpfull-zip': 'VCP 全家桶包',
+    'generic-zip': 'ZIP 压缩包',
+  }[type] || type
 }

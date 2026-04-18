@@ -54,6 +54,7 @@ const routes: RouteRecordRaw[] = [
       // 系统
       { path: 'maintenance', name: 'maintenance', component: () => import('@/views/system/MaintenanceView.vue'), meta: { group: 'system', title: '运维中心' } },
       { path: 'migration', name: 'migration', component: () => import('@/views/system/MigrationView.vue'), meta: { group: 'system', title: '上游迁移' } },
+      { path: 'backup', name: 'backup', component: () => import('@/views/system/BackupView.vue'), meta: { group: 'system', title: '备份管理' } },
     ],
   },
   {

@@ -72,6 +72,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { title: '运维中心', route: 'maintenance', icon: 'construction' },
       { title: '上游迁移', route: 'migration', icon: 'swap_horiz' },
+      { title: '备份管理', route: 'backup', icon: 'backup' },
     ],
   },
 ]
