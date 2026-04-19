@@ -30,7 +30,7 @@ const editorEl = ref<HTMLDivElement | null>(null)
 let internalUpdate = false
 
 // ============ 占位符分类 ============
-type VarKind = 'Tar' | 'Var' | 'Sar' | 'Agent' | 'Sys' | 'Timeline' | 'Rag' | 'RagSim' | 'RagHybrid' | 'Tool' | 'Toolbox' | 'Emoji' | 'Diary'
+type VarKind = 'Tar' | 'Var' | 'Sar' | 'Agent' | 'Sys' | 'Rag' | 'RagSim' | 'RagHybrid' | 'Tool' | 'Toolbox' | 'Emoji' | 'Diary'
 type ChipFormat = 'var' | 'rag' | 'rag_sim' | 'rag_hybrid'
 
 // Toolbox alias 集合（运行期从后端拉，classify 用于识别 {{alias}} / {{toolbox:alias}}）
@@ -52,8 +52,6 @@ function classify(name: string, format: ChipFormat = 'var'): VarKind {
   if (name.startsWith('toolbox:')) return 'Toolbox'
   // 无前缀 alias 命中 toolbox 集合 → Toolbox
   if (toolboxAliases.value.has(name)) return 'Toolbox'
-  // VarTimeline{Agent} 是 TimelineOrganizer 插件维护的 Agent 生平时间线，归专属类
-  if (name.startsWith('VarTimeline')) return 'Timeline'
   if (name.startsWith('Tar')) return 'Tar'
   if (name.startsWith('Var')) return 'Var'
   if (name.startsWith('Sar')) return 'Sar'
@@ -69,7 +67,6 @@ function classify(name: string, format: ChipFormat = 'var'): VarKind {
 
 const KIND_LABEL: Record<VarKind, string> = {
   Tar: '系统级', Var: '通用', Sar: '模型条件', Agent: 'Agent', Sys: '内置',
-  Timeline: '时间线',
   Rag: 'RAG 无条件', RagSim: '相似度检索', RagHybrid: '混合阈值', Tool: 'VCP 工具',
   Toolbox: 'Toolbox 工具集',
   Emoji: '表情包',
@@ -105,15 +102,12 @@ function getHealth(name: string, format: ChipFormat = 'var'): PlaceholderHealth 
   // Toolbox 工具集 → ✅
   const toolboxName = name.startsWith('toolbox:') ? name.slice(8) : name
   if (toolboxAliases.value.has(toolboxName)) return 'ok'
-  // 内置系统占位符白名单（Date/Time/Today/Festival/Port/Image_Key 等走 placeholderMap 已覆盖，
-  // 这里兜底特殊前缀 — VarTimeline 由 TimelineOrganizer bootstrap 动态注入）
-  if (name.startsWith('VarTimeline')) return 'ok'
   // registry 命中
   const found = lookupPlaceholder(placeholderRegistry.value, name)
   if (found) {
     // 如果对应的插件已装 → ✅（比如 EmojiListGenerator 装了，Nova表情包/Hornet表情包 都应该是 ok）
     if (installedPluginNames.value.has(found.pluginKey)) return 'ok'
-    // 核心插件默认视为已装（registry 里标 isCorePlugin，如 TimelineOrganizer）
+    // 核心插件默认视为已装（registry 里标 isCorePlugin）
     const ruleMatch = (placeholderRegistry.value?.patternRules || []).find(r => {
       try { return new RegExp(r.pattern, r.flags || '').test(name) && r.plugin === found.pluginKey } catch { return false }
     })
@@ -1419,7 +1413,6 @@ function insertAllTools() {
   &.kind-Tar { background: rgba(106, 120, 212, 0.18); color: #4956b5; border: 1px solid rgba(106, 120, 212, 0.4); }
   &.kind-Var { background: rgba(92, 178, 163, 0.18); color: #3d8d80; border: 1px solid rgba(92, 178, 163, 0.4); }
   &.kind-Sar { background: rgba(230, 138, 76, 0.18); color: #b96b2f; border: 1px solid rgba(230, 138, 76, 0.4); }
-  &.kind-Timeline { background: rgba(217, 119, 87, 0.18); color: #b8522e; border: 1px solid rgba(217, 119, 87, 0.4); }
   &.kind-Rag { background: rgba(139, 92, 246, 0.18); color: #6d3fc5; border: 1px solid rgba(139, 92, 246, 0.4); }
   &.kind-RagSim { background: rgba(99, 102, 241, 0.18); color: #4c4fd4; border: 1px solid rgba(99, 102, 241, 0.4); }
   &.kind-RagHybrid { background: rgba(217, 70, 239, 0.18); color: #a732c8; border: 1px solid rgba(217, 70, 239, 0.4); }
@@ -1480,7 +1473,6 @@ function insertAllTools() {
   &.kind-Tar { border-color: rgba(106, 120, 212, 0.5); background: linear-gradient(135deg, rgba(106, 120, 212, 0.08), rgba(106, 120, 212, 0.02)); }
   &.kind-Var { border-color: rgba(92, 178, 163, 0.5); background: linear-gradient(135deg, rgba(92, 178, 163, 0.08), rgba(92, 178, 163, 0.02)); }
   &.kind-Sar { border-color: rgba(230, 138, 76, 0.5); background: linear-gradient(135deg, rgba(230, 138, 76, 0.08), rgba(230, 138, 76, 0.02)); }
-  &.kind-Timeline { border-color: rgba(217, 119, 87, 0.5); background: linear-gradient(135deg, rgba(217, 119, 87, 0.08), rgba(217, 119, 87, 0.02)); }
   &.kind-Rag { border-color: rgba(139, 92, 246, 0.5); background: linear-gradient(135deg, rgba(139, 92, 246, 0.08), rgba(139, 92, 246, 0.02)); }
   &.kind-RagSim { border-color: rgba(99, 102, 241, 0.5); background: linear-gradient(135deg, rgba(99, 102, 241, 0.08), rgba(99, 102, 241, 0.02)); }
   &.kind-RagHybrid { border-color: rgba(217, 70, 239, 0.5); background: linear-gradient(135deg, rgba(217, 70, 239, 0.08), rgba(217, 70, 239, 0.02)); }
@@ -1535,7 +1527,6 @@ function insertAllTools() {
   &.kind-Tar .cc-kind-tag { background: #6a78d4; }
   &.kind-Var .cc-kind-tag { background: #5cb2a3; }
   &.kind-Sar .cc-kind-tag { background: #e68a4c; }
-  &.kind-Timeline .cc-kind-tag { background: #d97757; }
   &.kind-Rag .cc-kind-tag { background: #8b5cf6; }
   &.kind-RagSim .cc-kind-tag { background: #6366f1; }
   &.kind-RagHybrid .cc-kind-tag { background: #d946ef; }

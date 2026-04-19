@@ -1,6 +1,6 @@
 {
   "name": "vcptoolbox-junior-panel",
-  "version": "2.0.0-beta.6",
+  "version": "2.0.0-beta.7",
   "private": true,
   "type": "module",
   "description": "VCPtoolbox-Junior AdminPanel — Vue 3 + TypeScript 重构版",
