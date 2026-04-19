@@ -8,3 +8,4 @@
 | 2026-04-16 | 019d95c4 | 700d6c7 | ✨ feat(editor): PromptEditor 三 RAG 格式识别 + RagChipEditor | 6 | 2 | med |
 | 2026-04-16 | 019d95d9 | 41d358a | ✨ feat(editor): Agent 工具系统小白提示 + Toolbox 工具集可视化集成 | 4 | 0 | low |
 | 2026-04-16 | 019d9639 | 1af0d4e | ✨ feat(editor): 占位符三态识别 + 一键修复 + Emoji 分类 + Toolbox 集成 | 6 | 2 | med |
+| 2026-04-19 | 019da53b | e1c0d0f | ✨ feat(config): 全局配置 V2 重构 + 玫粉玻璃态 + TVS 编辑器美化 | 12 | 4 | high |
