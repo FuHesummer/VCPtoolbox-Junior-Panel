@@ -22,7 +22,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'newapi-monitor', name: 'newapi-monitor', component: () => import('@/views/overview/NewApiMonitorView.vue'), meta: { group: 'overview', title: 'NewAPI 监控' } },
 
       // 配置
-      { path: 'base-config', name: 'base-config', component: () => import('@/views/config/BaseConfigView.vue'), meta: { group: 'config', title: '全局配置' } },
+      { path: 'base-config', name: 'base-config', component: () => import('@/views/config/GlobalConfigView.vue'), meta: { group: 'config', title: '全局配置' } },
       { path: 'agents', name: 'agents', component: () => import('@/views/config/AgentManagerView.vue'), meta: { group: 'config', title: 'Agent 管理' } },
       { path: 'tvs', name: 'tvs', component: () => import('@/views/config/TvsEditorView.vue'), meta: { group: 'config', title: '变量编辑器' } },
       { path: 'toolbox', name: 'toolbox', component: () => import('@/views/config/ToolboxManagerView.vue'), meta: { group: 'config', title: 'Toolbox 管理' } },

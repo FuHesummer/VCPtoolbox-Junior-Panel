@@ -28,7 +28,7 @@ export const NAV_GROUPS: NavGroup[] = [
     key: 'config',
     title: '配置',
     items: [
-      { title: '全局配置', route: 'base-config', icon: 'settings' },
+      { title: '全局配置', route: 'base-config', icon: 'tune' },
       { title: 'Agent 管理', route: 'agents', icon: 'smart_toy' },
       { title: '变量编辑器', route: 'tvs', icon: 'data_object' },
       { title: 'Toolbox 管理', route: 'toolbox', icon: 'build' },

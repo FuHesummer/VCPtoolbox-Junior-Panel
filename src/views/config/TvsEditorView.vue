@@ -53,17 +53,21 @@
             v-for="f in filteredFiles"
             :key="f.name"
             class="file-card"
-            :class="{ active: selected === f.name }"
+            :class="[fileTypeClass(f), { active: selected === f.name }]"
             @click="openFile(f.name)"
           >
             <div class="row top">
-              <span class="material-symbols-outlined icon">draft</span>
+              <span class="material-symbols-outlined icon">{{ fileTypeIcon(f) }}</span>
               <strong class="filename">{{ f.name }}</strong>
+              <span class="type-badge" :class="fileTypeClass(f)">{{ fileTypeLabel(f) }}</span>
               <button class="icon-btn danger" title="删除此变量文件" @click.stop="confirmDelete(f.name)">
                 <span class="material-symbols-outlined">delete</span>
               </button>
             </div>
             <div class="meta-line">
+              <span v-if="f.refs?.length" class="env-key" :title="`env: ${f.refs[0].envKey}`">
+                <span class="material-symbols-outlined">key</span>{{ f.refs[0].envKey }}
+              </span>
               <span v-if="f.refs?.length" class="ref-count" :title="`被 ${f.refs.length} 个占位符引用`">
                 <span class="material-symbols-outlined">link</span>{{ f.refs.length }}
               </span>
@@ -94,16 +98,17 @@
 
         <template v-else>
           <!-- 元数据卡 -->
-          <div class="meta-card card">
+          <div class="meta-card card" :class="selectedTypeClass">
             <header class="meta-head">
-              <span class="material-symbols-outlined">draft</span>
+              <span class="material-symbols-outlined">{{ selectedTypeIcon }}</span>
               <strong>{{ selected }}</strong>
+              <span v-if="currentRefs.length" class="env-chip" :class="currentRefs[0].kind">{{ currentRefs[0].envKey }}</span>
               <span class="spacer" />
               <span class="stat" v-if="content">
                 <span class="material-symbols-outlined">data_usage</span>
                 {{ formatBytes(content.length) }} · {{ content.split('\n').length }} 行
               </span>
-              <span v-if="dirty" class="dirty-pill">● 未保存</span>
+              <span v-if="dirty" class="dirty-pill">* 未保存</span>
               <button class="btn compact" :disabled="!dirty" @click="save">
                 <span class="material-symbols-outlined">save</span>保存
               </button>
@@ -473,6 +478,44 @@ async function removeGlobalBinding(filename: string) {
   }
 }
 
+// === 文件类型判断 ===
+function inferFileType(f: FileEntry): 'Tar' | 'Var' | 'Sar' | 'Other' {
+  if (f.refs?.length) return f.refs[0].kind
+  const stem = f.name.replace(/\.txt$/i, '').toLowerCase()
+  if (stem.startsWith('tar')) return 'Tar'
+  if (stem.startsWith('var')) return 'Var'
+  if (stem.startsWith('sar')) return 'Sar'
+  return 'Other'
+}
+
+function fileTypeIcon(f: FileEntry): string {
+  const t = inferFileType(f)
+  if (t === 'Var') return 'data_object'
+  if (t === 'Tar') return 'tune'
+  if (t === 'Sar') return 'psychology'
+  return 'description'
+}
+
+function fileTypeLabel(f: FileEntry): string {
+  return inferFileType(f)
+}
+
+function fileTypeClass(f: FileEntry): string {
+  return 'type-' + inferFileType(f).toLowerCase()
+}
+
+const selectedTypeIcon = computed(() => {
+  if (!selected.value) return 'draft'
+  const entry = files.value.find((f) => f.name === selected.value)
+  return entry ? fileTypeIcon(entry) : 'draft'
+})
+
+const selectedTypeClass = computed(() => {
+  if (!selected.value) return ''
+  const entry = files.value.find((f) => f.name === selected.value)
+  return entry ? fileTypeClass(entry) : ''
+})
+
 // === 工具 ===
 function formatBytes(n: number) {
   if (n < 1024) return `${n} B`
@@ -553,23 +596,42 @@ onMounted(reload)
   .count { background: var(--accent-bg); color: var(--highlight-text); padding: 1px 7px; border-radius: var(--radius-pill); font-size: 11px; }
 }
 
-.cards { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; }
+.cards { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
 
 .file-card {
   background: var(--tertiary-bg);
   border: 1px solid var(--border-color);
+  border-left: 3px solid var(--border-color);
   border-radius: var(--radius-md);
-  padding: 9px 10px;
+  padding: 14px;
   cursor: pointer;
   transition: all 0.15s;
-  display: flex; flex-direction: column; gap: 4px;
+  display: flex; flex-direction: column; gap: 6px;
 
-  &:hover { transform: translateX(2px); box-shadow: 0 2px 8px rgba(180, 120, 140, 0.1); border-color: var(--button-bg); }
-  &.active { background: var(--accent-bg); border-color: var(--button-bg); }
+  &:hover { transform: translateX(2px); box-shadow: 0 2px 8px rgba(180, 120, 140, 0.1); }
+  &.active { background: var(--accent-bg); }
+
+  // type-specific left border + hover
+  &.type-tar { border-left-color: #6a78d4;
+    &:hover { border-color: #6a78d4; border-left-color: #6a78d4; }
+    &.active { border-color: #6a78d4; border-left-color: #6a78d4; background: rgba(106, 120, 212, 0.06); }
+  }
+  &.type-var { border-left-color: #5cb2a3;
+    &:hover { border-color: #5cb2a3; border-left-color: #5cb2a3; }
+    &.active { border-color: #5cb2a3; border-left-color: #5cb2a3; background: rgba(92, 178, 163, 0.06); }
+  }
+  &.type-sar { border-left-color: #9b6dd0;
+    &:hover { border-color: #9b6dd0; border-left-color: #9b6dd0; }
+    &.active { border-color: #9b6dd0; border-left-color: #9b6dd0; background: rgba(155, 109, 208, 0.06); }
+  }
+  &.type-other { border-left-color: var(--secondary-text);
+    &:hover { border-color: var(--button-bg); border-left-color: var(--button-bg); }
+    &.active { border-color: var(--button-bg); border-left-color: var(--button-bg); }
+  }
 
   .row.top {
-    display: flex; align-items: center; gap: 6px;
-    .icon { color: var(--button-bg); font-size: 16px; }
+    display: flex; align-items: center; gap: 8px;
+    .icon { font-size: 18px; }
     .filename {
       flex: 1; font-size: 12.5px; color: var(--primary-text);
       font-family: 'JetBrains Mono', monospace;
@@ -577,8 +639,33 @@ onMounted(reload)
     }
   }
 
+  // type-specific icon color
+  &.type-tar .row.top .icon { color: #6a78d4; }
+  &.type-var .row.top .icon { color: #5cb2a3; }
+  &.type-sar .row.top .icon { color: #9b6dd0; }
+  &.type-other .row.top .icon { color: var(--secondary-text); }
+
+  .type-badge {
+    font-size: 10px; font-weight: 600; font-family: monospace;
+    padding: 1px 7px; border-radius: var(--radius-pill);
+    letter-spacing: 0.3px; flex-shrink: 0;
+    &.type-tar { background: rgba(106, 120, 212, 0.15); color: #6a78d4; }
+    &.type-var { background: rgba(92, 178, 163, 0.15); color: #3d8a7d; }
+    &.type-sar { background: rgba(155, 109, 208, 0.15); color: #7b50b0; }
+    &.type-other { background: var(--accent-bg); color: var(--secondary-text); }
+  }
+
   .meta-line {
     display: flex; gap: 6px; align-items: center; flex-wrap: wrap;
+    padding-top: 2px;
+
+    .env-key {
+      display: inline-flex; align-items: center; gap: 3px;
+      font-size: 10.5px; font-family: 'JetBrains Mono', monospace;
+      color: var(--secondary-text);
+      .material-symbols-outlined { font-size: 11px; }
+    }
+
     .ref-count {
       display: inline-flex; align-items: center; gap: 3px;
       padding: 1px 7px; border-radius: var(--radius-pill);
@@ -658,21 +745,42 @@ onMounted(reload)
   border-bottom: 1px solid var(--border-color);
   background: linear-gradient(135deg, rgba(212, 116, 142, 0.06), transparent 70%);
 
-  // 只染色头部装饰图标（紧跟 strong 前面那个），避免污染 button/stat 内部的图标
-  > .material-symbols-outlined:first-child { color: var(--button-bg); font-size: 18px; }
+  > .material-symbols-outlined:first-child { color: var(--button-bg); font-size: 20px; }
 
   strong { font-size: 14px; color: var(--primary-text); font-family: 'JetBrains Mono', monospace; }
+
+  .env-chip {
+    font-size: 10.5px; font-family: 'JetBrains Mono', monospace; font-weight: 500;
+    padding: 2px 8px; border-radius: var(--radius-pill);
+    &.Tar { background: rgba(106, 120, 212, 0.12); color: #6a78d4; }
+    &.Var { background: rgba(92, 178, 163, 0.12); color: #3d8a7d; }
+    &.Sar { background: rgba(155, 109, 208, 0.12); color: #7b50b0; }
+    &.Other { background: var(--accent-bg); color: var(--secondary-text); }
+  }
+
   .spacer { flex: 1; }
   .stat { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; color: var(--secondary-text); font-family: monospace;
     .material-symbols-outlined { font-size: 14px; }
   }
   .dirty-pill { color: #f1ae28; font-size: 11px; font-weight: 500; }
 
-  // 保存按钮内的图标强制继承按钮文字色（白色）+ 行内 flex 对齐避免基线偏移
   .btn.compact {
     font-size: 12px; padding: 4px 12px;
     display: inline-flex; align-items: center; gap: 4px;
     .material-symbols-outlined { color: inherit; font-size: 14px; line-height: 1; }
+  }
+}
+
+// type-specific header gradient
+.meta-card {
+  &.type-tar .meta-head { background: linear-gradient(135deg, rgba(106, 120, 212, 0.06), transparent 70%);
+    > .material-symbols-outlined:first-child { color: #6a78d4; }
+  }
+  &.type-var .meta-head { background: linear-gradient(135deg, rgba(92, 178, 163, 0.06), transparent 70%);
+    > .material-symbols-outlined:first-child { color: #5cb2a3; }
+  }
+  &.type-sar .meta-head { background: linear-gradient(135deg, rgba(155, 109, 208, 0.06), transparent 70%);
+    > .material-symbols-outlined:first-child { color: #9b6dd0; }
   }
 }
 
