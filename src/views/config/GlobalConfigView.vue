@@ -359,8 +359,14 @@ const isSearching = computed(() => searchQuery.value.trim().length > 0)
 
 const dirtyKeys = computed<Set<string>>(() => {
   const set = new Set<string>()
+  // 1. 值被修改 / 新增的 key
   for (const [key, val] of Object.entries(editedValues.value)) {
     if (originalValues.value[key] !== val) set.add(key)
+  }
+  // 2. 被删除的 key（原本存在，editedValues 里被 delete —— 如 removeDreamAgent）
+  //    不加这条循环，delete 操作不会触发 isDirty，保存按钮不亮
+  for (const key of Object.keys(originalValues.value)) {
+    if (!(key in editedValues.value)) set.add(key)
   }
   return set
 })
@@ -695,6 +701,12 @@ async function save() {
     if (rawMode.value) {
       content = rawContent.value
     } else {
+      // 收集被删除的 key（原本存在 originalValues，editedValues 里 delete 掉了，如 removeDreamAgent）
+      const deletedKeys = new Set<string>()
+      for (const key of Object.keys(originalValues.value)) {
+        if (!(key in editedValues.value)) deletedKeys.add(key)
+      }
+
       // Merge editedValues back into parsed items
       const updatedItems = envItems.value.map(item => {
         if (item.kind !== 'entry') return item
@@ -722,9 +734,12 @@ async function save() {
         }
       }
 
-      // Filter out entries that were fully cleared and did not originally exist
+      // Filter：
+      // 1. 被 delete 的 key → 从 items 过滤掉（彻底删除）
+      // 2. 空串且非原生的 key → 过滤（dynamic-pair 清空场景）
       const finalItems = updatedItems.filter(item => {
         if (item.kind !== 'entry') return true
+        if (deletedKeys.has(item.key)) return false
         const edited = editedValues.value[item.key]
         if (edited === '' && !(item.key in originalValues.value)) return false
         return true
