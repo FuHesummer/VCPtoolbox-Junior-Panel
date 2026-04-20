@@ -1,13 +1,16 @@
 <template>
   <header class="topbar">
     <div class="brand">
+      <button class="btn-menu" @click="ui.toggleSidebar()">
+        <span class="material-symbols-outlined">{{ ui.sidebarOpen ? 'close' : 'menu' }}</span>
+      </button>
       <img src="/VCPLogo2.png" alt="VCP" class="logo" />
       <span class="title">VCPtoolbox-Junior</span>
     </div>
     <div class="actions">
       <button class="btn btn-ghost" @click="restart" title="重启服务">
         <span class="material-symbols-outlined">restart_alt</span>
-        重启
+        <span class="action-label">重启</span>
       </button>
       <button class="btn btn-ghost" @click="logout" title="登出">
         <span class="material-symbols-outlined">logout</span>
@@ -78,8 +81,58 @@ async function restart() {
   }
 }
 
+.btn-menu {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--primary-text);
+  cursor: pointer;
+  transition: background 0.15s;
+  flex-shrink: 0;
+
+  &:hover { background: var(--accent-bg); }
+  .material-symbols-outlined { font-size: 24px; }
+}
+
 .actions {
   display: flex;
   gap: 8px;
+}
+
+@media (max-width: 768px) {
+  .topbar {
+    padding: 0 12px;
+  }
+
+  .brand {
+    gap: 8px;
+
+    .logo {
+      width: 28px;
+      height: 28px;
+    }
+
+    .title {
+      font-size: 14px;
+    }
+  }
+
+  .btn-menu {
+    display: flex;
+  }
+
+  .action-label {
+    display: none;
+  }
+
+  .actions .btn {
+    padding: 6px 10px;
+  }
 }
 </style>

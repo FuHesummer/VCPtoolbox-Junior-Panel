@@ -52,4 +52,18 @@
   --topbar-height: 56px;
   --sidebar-width: 260px;
   --content-padding: 12px;
+
+  // Mobile
+  --mobile-breakpoint: 768px;
+  --touch-target-min: 44px;
+}
+
+@media (max-width: 768px) {
+  :root {
+    --topbar-height: 48px;
+    --sidebar-width: 280px;
+    --content-padding: 8px;
+    --card-radius: 12px;
+    --radius-md: 10px;
+  }
 }

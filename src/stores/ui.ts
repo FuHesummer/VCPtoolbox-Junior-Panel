@@ -12,8 +12,12 @@ export interface ToastMessage {
 export const useUiStore = defineStore('ui', () => {
   const loadingCount = ref(0)
   const message = ref<ToastMessage | null>(null)
+  const sidebarOpen = ref(false)
   let toastTimer: number | null = null
   let toastId = 0
+
+  function toggleSidebar() { sidebarOpen.value = !sidebarOpen.value }
+  function closeSidebar() { sidebarOpen.value = false }
 
   function showLoading(show: boolean) {
     if (show) loadingCount.value++
@@ -28,5 +32,5 @@ export const useUiStore = defineStore('ui', () => {
     }, duration)
   }
 
-  return { loadingCount, message, showLoading, showMessage }
+  return { loadingCount, message, sidebarOpen, showLoading, showMessage, toggleSidebar, closeSidebar }
 })

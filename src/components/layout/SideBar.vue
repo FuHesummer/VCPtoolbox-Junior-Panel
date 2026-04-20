@@ -163,4 +163,36 @@ onMounted(loadPluginNav)
     font-size: 20px;
   }
 }
+
+@media (max-width: 768px) {
+  .sidebar {
+    position: fixed;
+    top: var(--topbar-height);
+    left: 0;
+    bottom: 0;
+    z-index: 200;
+    border-radius: 0 var(--card-radius) var(--card-radius) 0;
+    transform: translateX(-100%);
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.15);
+    -webkit-overflow-scrolling: touch;
+
+    &.open {
+      transform: translateX(0);
+    }
+  }
+
+  .nav-item {
+    padding: 10px 12px;
+    min-height: var(--touch-target-min);
+  }
+
+  .search {
+    padding: 8px 12px;
+
+    input {
+      font-size: 16px;
+    }
+  }
+}
 </style>

@@ -130,3 +130,37 @@ a {
   padding: 20px;
   min-height: calc(100vh - var(--topbar-height) - 24px);
 }
+
+// ──── Mobile responsive ────
+@media (max-width: 768px) {
+  body {
+    font-size: 15px;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  .page {
+    padding: 12px;
+    min-height: auto;
+  }
+
+  .card {
+    padding: 14px;
+  }
+
+  .btn {
+    min-height: var(--touch-target-min);
+    padding: 10px 16px;
+  }
+
+  input, textarea, select {
+    font-size: 16px;
+    min-height: var(--touch-target-min);
+    padding: 10px 12px;
+  }
+
+  table {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}
